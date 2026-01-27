@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GPT-5 Mini Toggle</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>GPT-5 Mini</h1>
+    <label class="switch">
+      <input id="gpt5-toggle" type="checkbox">
+      <span class="slider"></span>
+    </label>
+    <div class="label">Enable GPT-5 mini for all clients</div>
+    <div id="status" class="status"></div>
+    <small class="note">This toggle changes a local setting only. Server-side changes are required to actually enable the model for clients.</small>
+      <hr>
+      <div class="server-block">
+        <h2>Server (optional)</h2>
+        <label class="small">Server URL</label>
+        <input id="server-url" placeholder="http://localhost:3000" />
+        <label class="small">Admin token (optional)</label>
+        <input id="server-token" placeholder="admin-token" />
+        <label class="small-inline"><input id="sync-checkbox" type="checkbox"> Sync to server when toggled</label>
+        <div id="server-status" class="status"></div>
+      </div>
+  </div>
+  <script src="popup.js"></script>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+</body>
+</html>
