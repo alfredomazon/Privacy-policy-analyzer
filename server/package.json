@@ -1,0 +1,13 @@
+{
+  "name": "gpt5-admin-server",
+  "version": "0.1.0",
+  "description": "Simple admin server to toggle GPT-5 mini enabled flag (for demo)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "GPT-5 Mini Toggle",
+  "version": "0.1.0",
+  "description": "Toggle 'Enable GPT-5 mini for all clients' (UI only).",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.svg",
+      "48": "icons/icon48.svg",
+      "128": "icons/icon128.svg"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ]
+}
