@@ -4,7 +4,7 @@
 const SERVER_URL_KEY = "gpt5ServerUrl";
 const SERVER_TOKEN_KEY = "gpt5ServerToken";
 const SERVER_SYNC_KEY = "gpt5ServerSync";
-const TOKEN_KEY = "gpt5ExtensionToken";
+const EXTENSION_TOKEN_KEY = "gpt5ExtensionToken";
 
 function setStatusText(statusEl, enabled) {
   statusEl.textContent = enabled ? "Enabled (local setting)" : "Disabled (local setting)";
