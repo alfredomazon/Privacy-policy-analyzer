@@ -1,11 +1,15 @@
-const KEY = 'gpt5Enabled';
+// background.js (service worker)
+
+const TOGGLE_KEY = "gpt5Enabled";
 const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
-const EXTENSION_TOKEN_KEY = "gpt5ServerToken";
+
+// MUST match what popup.js saves for the extension token input:
+const EXTENSION_TOKEN_KEY = "gpt5ExtensionToken";
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get([KEY], (res) => {
-    if (res[KEY] === undefined) {
-      chrome.storage.local.set({ [KEY]: false });
+  chrome.storage.local.get([TOGGLE_KEY], (res) => {
+    if (res[TOGGLE_KEY] === undefined) {
+      chrome.storage.local.set({ [TOGGLE_KEY]: false });
     }
   });
 });
@@ -13,60 +17,68 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
 
-  if (msg.type === 'getStatus') {
-    chrome.storage.local.get([KEY], (res) => {
-      sendResponse({ enabled: !!res[KEY] });
+  // 1) popup asks: what's toggle state?
+  if (msg.type === "getStatus") {
+    chrome.storage.local.get([TOGGLE_KEY], (res) => {
+      sendResponse({ enabled: !!res[TOGGLE_KEY] });
     });
-    return true; // indicate async response
+    return true;
   }
 
-  if (msg.type === 'setStatus') {
-    chrome.storage.local.set({ [KEY]: !!msg.enabled }, () => {
+  // 2) popup says: set toggle state
+  if (msg.type === "setStatus") {
+    chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
       sendResponse({ ok: true });
     });
-    return true; // indicate async response
+    return true;
   }
-});
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || msg.type !== "analyzePolicy") return;
+  // 3) popup says: analyze this text
+  if (msg.type === "analyzePolicy") {
+    (async () => {
+      try {
+        // (Optional) block analyze if your toggle is off
+        const toggleRes = await chrome.storage.local.get([TOGGLE_KEY]);
+        if (!toggleRes[TOGGLE_KEY]) {
+          sendResponse({ ok: false, error: "Analyzer is disabled. Turn it on first." });
+          return;
+        }
 
-  (async () => {
-    try {
-      // get token from storage (same place your popup saves it)
-      const stored = await chrome.storage.local.get([EXTENSION_TOKEN_KEY]);
-      const token = stored[EXTENSION_TOKEN_KEY];
+        // get extension token from storage (same place popup saves it)
+        const stored = await chrome.storage.local.get([EXTENSION_TOKEN_KEY]);
+        const token = stored[EXTENSION_TOKEN_KEY];
 
-      if (!token) {
-        sendResponse({ ok: false, error: "Missing Extension Token in settings." });
-        return;
-      }
+        if (!token) {
+          sendResponse({ ok: false, error: "Missing Extension Token. Paste it in the popup settings." });
+          return;
+        }
 
-      const r = await fetch(`${SERVER_URL}/analyze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Extension-Token": token
-        },
-        body: JSON.stringify({ text: msg.text })
-      });
-
-      const data = await r.json().catch(() => null);
-
-      if (!r.ok) {
-        sendResponse({
-          ok: false,
-          error: (data && data.error) ? data.error : `HTTP ${r.status}`,
-          details: data
+        const r = await fetch(`${SERVER_URL}/analyze`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Extension-Token": token,
+          },
+          body: JSON.stringify({ text: msg.text }),
         });
-        return;
+
+        const data = await r.json().catch(() => null);
+
+        if (!r.ok) {
+          sendResponse({
+            ok: false,
+            error: (data && data.error) ? data.error : `HTTP ${r.status}`,
+            details: data,
+          });
+          return;
+        }
+
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err?.message || String(err) });
       }
+    })();
 
-      sendResponse({ ok: true, data });
-    } catch (err) {
-      sendResponse({ ok: false, error: err?.message || String(err) });
-    }
-  })();
-
-  return true; // IMPORTANT: keep the message channel open for async response
+    return true; // keep channel open
+  }
 });
