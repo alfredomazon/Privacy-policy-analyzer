@@ -4,7 +4,7 @@ const TOGGLE_KEY = "gpt5Enabled";
 const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
 
 // MUST match what popup.js saves for the extension token input:
-const EXTENSION_TOKEN_KEY = "gpt5ExtensionToken";
+const TOKEN_KEY = "gpt5ExtensionToken";
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get([TOGGLE_KEY], (res) => {
@@ -45,8 +45,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         // get extension token from storage (same place popup saves it)
-        const stored = await chrome.storage.local.get([EXTENSION_TOKEN_KEY]);
-        const token = stored[EXTENSION_TOKEN_KEY];
+        const stored = await chrome.storage.local.get([TOKEN_KEY]);
+        const token = stored[TOKEN_KEY];
 
         if (!token) {
           sendResponse({ ok: false, error: "Missing Extension Token. Paste it in the popup settings." });
