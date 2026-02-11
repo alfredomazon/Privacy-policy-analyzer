@@ -10,6 +10,10 @@ const serverTokenInput = document.getElementById('server-token');
 const syncCheckbox = document.getElementById('sync-checkbox');
 const serverStatusEl = document.getElementById('server-status');
 const toastContainer = document.getElementById('toast-container');
+const tokenInput = document.getElementById("token");
+const textArea = document.getElementById("text");
+const out = document.getElementById("out");
+const btn = document.getElementById("analyze");
 
 function setStatusText(enabled){
   statusEl.textContent = enabled ? 'Enabled (local setting)' : 'Disabled (local setting)';
