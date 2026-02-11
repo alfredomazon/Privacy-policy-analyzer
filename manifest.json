@@ -17,6 +17,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "https://privacy-policy-analyzer-1.onrender.com/*"
   ]
 }

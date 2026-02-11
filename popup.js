@@ -87,3 +87,39 @@ syncCheckbox.addEventListener('change', () => {
 });
 
 document.addEventListener('DOMContentLoaded', loadStatus);
+
+async function loadSettings() {
+  const stored = await chrome.storage.local.get([TOKEN_KEY]);
+  tokenInput.value = stored[TOKEN_KEY] || "";
+}
+
+tokenInput.addEventListener("change", async () => {
+  await chrome.storage.local.set({ [TOKEN_KEY]: tokenInput.value.trim() });
+});
+
+btn.addEventListener("click", async () => {
+  const text = textArea.value.trim();
+  if (!text) {
+    out.textContent = "Paste some policy text first.";
+    return;
+  }
+
+  out.textContent = "Analyzing...";
+
+  chrome.runtime.sendMessage({ type: "analyzePolicy", text }, (res) => {
+    if (!res) {
+      out.textContent = "No response (background may not be running).";
+      return;
+    }
+    if (!res.ok) {
+      out.textContent = `Error: ${res.error}\n\n${JSON.stringify(res.details || {}, null, 2)}`;
+      return;
+    }
+
+    // Your server returns: { ok:true, result:{...} } OR { ok:true, data:{...} } depending on your wrapper
+    // In our background.js we return {ok:true, data: <serverResponse>}
+    out.textContent = JSON.stringify(res.data, null, 2);
+  });
+});
+
+loadSettings();
