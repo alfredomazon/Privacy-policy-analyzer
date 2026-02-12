@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:8000/analyze";
+const API_URL = "https://privacy-policy-analyzer-1.onrender.com/analyze";
 
 async function findPolicyLinks() {
   const anchors = Array.from(document.querySelectorAll("a"));
