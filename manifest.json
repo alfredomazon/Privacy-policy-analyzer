@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "GPT-5 Mini Toggle",
+  "name": "Privacy Policy Analyzer",
   "version": "0.1.0",
   "description": "Toggle 'Enable GPT-5 mini for all clients' (UI only).",
   "action": {
