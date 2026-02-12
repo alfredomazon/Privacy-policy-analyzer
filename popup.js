@@ -1,89 +1,71 @@
-const KEY = 'gpt5Enabled';
-const SERVER_URL_KEY = 'gpt5ServerUrl';
-const SERVER_TOKEN_KEY = 'gpt5ServerToken';
-const SERVER_SYNC_KEY = 'gpt5ServerSync';
+const API_URL = "http://localhost:8000/analyze";
 
-const checkbox = document.getElementById('gpt5-toggle');
-const statusEl = document.getElementById('status');
-const serverUrlInput = document.getElementById('server-url');
-const serverTokenInput = document.getElementById('server-token');
-const syncCheckbox = document.getElementById('sync-checkbox');
-const serverStatusEl = document.getElementById('server-status');
-const toastContainer = document.getElementById('toast-container');
+async function findPolicyLinks() {
+  const anchors = Array.from(document.querySelectorAll("a"));
 
-function setStatusText(enabled){
-  statusEl.textContent = enabled ? 'Enabled (local setting)' : 'Disabled (local setting)';
-}
+  const keywords = [
+    "privacy",
+    "terms",
+    "policy",
+    "legal",
+    "tos",
+    "conditions"
+  ];
 
-function showToast(message, type='info'){
-  if(!toastContainer) return;
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  toastContainer.appendChild(el);
-  requestAnimationFrame(()=> el.classList.add('visible'));
-  setTimeout(()=>{ el.classList.remove('visible'); setTimeout(()=> el.remove(), 220); }, 3500);
-}
+  const matches = anchors.filter(a => {
+    const text = (a.innerText || "").toLowerCase();
+    const href = (a.href || "").toLowerCase();
 
-function loadStatus(){
-  chrome.runtime.sendMessage({type:'getStatus'}, (res) => {
-    const enabled = !!(res && res.enabled);
-    checkbox.checked = enabled;
-    setStatusText(enabled);
+    return keywords.some(k => text.includes(k) || href.includes(k));
   });
-  // load server config
-  chrome.storage.local.get([SERVER_URL_KEY, SERVER_TOKEN_KEY, SERVER_SYNC_KEY], (res) => {
-    if(res){
-      serverUrlInput.value = res[SERVER_URL_KEY] || '';
-      serverTokenInput.value = res[SERVER_TOKEN_KEY] || '';
-      syncCheckbox.checked = !!res[SERVER_SYNC_KEY];
+
+  return matches.slice(0, 3).map(a => a.href);
+}
+
+async function extractTextFromPage(url) {
+  const res = await fetch(url);
+  const html = await res.text();
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  doc.querySelectorAll("script, style, img").forEach(e => e.remove());
+
+  return doc.body.innerText.slice(0, 200000);
+}
+
+document.getElementById("analyzeBtn").addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  const injected = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: findPolicyLinks
+  });
+
+  const links = injected[0].result;
+
+  let combined = "";
+
+  for (const link of links) {
+    try {
+      const text = await extractTextFromPage(link);
+      combined += `\n\nSOURCE: ${link}\n\n${text}`;
+    } catch (e) {
+      console.error("Failed to fetch:", link);
     }
+  }
+
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sourceUrl: tab.url,
+      policyUrls: links,
+      text: combined
+    })
   });
-}
 
-checkbox.addEventListener('change', () => {
-  const enabled = checkbox.checked;
-  chrome.runtime.sendMessage({type:'setStatus', enabled}, (res) => {
-    setStatusText(enabled);
-    if(syncCheckbox.checked && serverUrlInput.value){
-      syncToServer(serverUrlInput.value, serverTokenInput.value, enabled);
-    } else {
-      showToast('Local setting saved', 'success');
-    }
-  });
-});
+  const data = await res.json();
 
-function syncToServer(url, token, enabled){
-  serverStatusEl.textContent = 'Syncing...';
-  showToast('Syncing to server...', 'info');
-  fetch(`${url.replace(/\/$/, '')}/status`, {
-    method: 'POST',
-    headers: Object.assign({'Content-Type':'application/json'}, token ? {'X-Admin-Token': token} : {}),
-    body: JSON.stringify({enabled})
-  }).then(r => r.json())
-    .then(j => {
-      const ok = j && j.ok;
-      serverStatusEl.textContent = ok ? 'Server updated' : 'Server update failed';
-      showToast(ok ? 'Server updated' : 'Server update failed', ok ? 'success' : 'error');
-    }).catch(err => {
-      const msg = err && err.message ? err.message : String(err);
-      serverStatusEl.textContent = 'Sync error: ' + msg;
-      showToast('Sync error: ' + msg, 'error');
-    });
-}
-
-// save server config when inputs change
-serverUrlInput.addEventListener('change', () => {
-  chrome.storage.local.set({[SERVER_URL_KEY]: serverUrlInput.value});
-  showToast('Server URL saved', 'info');
+  document.getElementById("result").textContent =
+    JSON.stringify(data, null, 2);
 });
-serverTokenInput.addEventListener('change', () => {
-  chrome.storage.local.set({[SERVER_TOKEN_KEY]: serverTokenInput.value});
-  showToast('Server token saved', 'info');
-});
-syncCheckbox.addEventListener('change', () => {
-  chrome.storage.local.set({[SERVER_SYNC_KEY]: !!syncCheckbox.checked});
-  showToast(syncCheckbox.checked ? 'Sync enabled' : 'Sync disabled', 'info');
-});
-
-document.addEventListener('DOMContentLoaded', loadStatus);
