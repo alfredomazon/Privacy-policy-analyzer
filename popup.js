@@ -159,6 +159,154 @@ async function init() {
       });
     });
   }
+  // ===== AUTO ANALYZE: detect + extract policy text =====
+
+// Find likely policy links from the active tab
+async function findPolicyLinksFromActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const keywords = ["privacy", "terms", "policy", "legal", "tos", "conditions"];
+
+      const anchors = Array.from(document.querySelectorAll("a"));
+
+      const urls = anchors
+        .map(a => {
+          const text = (a.innerText || "").toLowerCase();
+          const href = a.getAttribute("href") || "";
+          const hay = `${text} ${href}`.toLowerCase();
+
+          if (!keywords.some(k => hay.includes(k))) return null;
+
+          try {
+            return new URL(href, window.location.href).toString();
+          } catch {
+            return null;
+          }
+        })
+        .filter(u => u && /^https?:\/\//i.test(u));
+
+      return Array.from(new Set(urls)).slice(0, 3);
+    }
+  });
+
+  return result || [];
+}
+
+// Fetch and clean text from a URL
+async function extractTextFromUrl(url) {
+  const res = await fetch(url);
+  const html = await res.text();
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  doc.querySelectorAll("script, style, noscript, svg, img").forEach(e => e.remove());
+
+  return (doc.body?.innerText || "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Select important paragraphs and cap size
+function selectImportantParagraphs(text, limit = 45000) {
+  const keywords = [
+    "collect","collection","use","share","sharing","third party","retain","retention",
+    "sell","advertis","cookie","tracking","location","biometric","children",
+    "opt out","delete","deletion","access","rights","gdpr","ccpa","california"
+  ];
+
+  const paras = text
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(p => p.length > 30);
+
+  const scored = paras.map(p => {
+    const lower = p.toLowerCase();
+    let score = 0;
+
+    for (const k of keywords) {
+      if (lower.includes(k)) score += 1;
+    }
+
+    score += Math.min(2, p.length / 800);
+
+    return { p, score };
+  }).sort((a, b) => b.score - a.score);
+
+  let outText = "";
+
+  for (const { p } of scored) {
+    if (outText.length + p.length + 2 > limit) continue;
+
+    outText += (outText ? "\n\n" : "") + p;
+
+    if (outText.length >= limit) break;
+  }
+
+  return outText.length ? outText : text.slice(0, limit);
+}
+
+// Auto-analyze button handler
+const autoBtn = document.getElementById("auto-analyze");
+
+if (autoBtn && out) {
+  autoBtn.addEventListener("click", async () => {
+    try {
+      out.textContent = "Finding policy links on current site...";
+
+      const links = await findPolicyLinksFromActiveTab();
+
+      if (!links.length) {
+        out.textContent = "No privacy/terms links found. Try manual paste.";
+        return;
+      }
+
+      out.textContent =
+        "Found links:\n" + links.join("\n") + "\n\nFetching text...";
+
+      let combined = "";
+
+      for (const link of links) {
+        try {
+          const text = await extractTextFromUrl(link);
+
+          combined += `\n\nSOURCE: ${link}\n\n${text}`;
+        } catch {
+          combined += `\n\nSOURCE: ${link}\n\n[Failed to fetch]`;
+        }
+      }
+
+      const trimmed = selectImportantParagraphs(combined, 45000);
+
+      out.textContent = "Sending extracted text to analyzer...";
+
+      chrome.runtime.sendMessage(
+        { type: "analyzePolicy", text: trimmed },
+        (res) => {
+          if (!res) {
+            out.textContent = "No response from background.";
+            return;
+          }
+
+          if (!res.ok) {
+            out.textContent =
+              `Error: ${res.error}\n\n` +
+              JSON.stringify(res.details || {}, null, 2);
+            return;
+          }
+
+          out.textContent = JSON.stringify(res.data, null, 2);
+        }
+      );
+    } catch (err) {
+      out.textContent =
+        "Auto-analyze failed: " + (err?.message || String(err));
+    }
+  });
+}
+
 }
 
 // Run once, after DOM exists
