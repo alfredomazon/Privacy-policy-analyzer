@@ -63,6 +63,7 @@ function renderHeuristic(els, r) {
     heuristicLink,
     heuristicOpen,
     heuristicReasons,
+    dataChecklist,
   } = els;
 
   const setReasons = (items) => {
@@ -86,12 +87,82 @@ function renderHeuristic(els, r) {
     }
   };
 
+  const renderChecklist = (dataCollected, dataEvidence, isPolicyPage) => {
+    if (!dataChecklist) return;
+    dataChecklist.innerHTML = "";
+
+    const labels = {
+      identifiers: "Identifiers (name/email/phone/IP)",
+      device_network: "Device & network (device ID/logs)",
+      location: "Location data",
+      cookies_tracking: "Cookies & tracking/ads",
+      payment_financial: "Payments & financial",
+      contacts_content: "Contacts & user content",
+      biometric: "Biometric data",
+      sensitive: "Sensitive data (health/ID/etc.)",
+      children: "Children/minors info",
+      sharing_third_parties: "Sharing/third parties",
+      retention_rights: "Retention & user rights",
+    };
+
+    // Not on policy page yet
+    if (!isPolicyPage) {
+      const note = document.createElement("div");
+      note.className = "checklist-note";
+      note.textContent = "Open the policy page to extract detected data types.";
+      dataChecklist.appendChild(note);
+      return;
+    }
+
+    const hasAny = dataCollected && Object.values(dataCollected).some(Boolean);
+    if (!hasAny) {
+      const note = document.createElement("div");
+      note.className = "checklist-note";
+      note.textContent = "Policy page detected, but no clear data-type keywords were found.";
+      dataChecklist.appendChild(note);
+      return;
+    }
+
+    for (const key of Object.keys(labels)) {
+      const checked = !!dataCollected?.[key];
+
+      const row = document.createElement("div");
+      row.className = "check-row";
+
+      const box = document.createElement("span");
+      box.className = "check-box" + (checked ? " checked" : "");
+      box.textContent = checked ? "✓" : "";
+
+      const text = document.createElement("div");
+      text.className = "check-text";
+
+      const title = document.createElement("div");
+      title.className = "check-title";
+      title.textContent = labels[key];
+
+      text.appendChild(title);
+
+      const ev = (dataEvidence?.[key] || []).slice(0, 3);
+      if (checked && ev.length) {
+        const e = document.createElement("div");
+        e.className = "check-evidence";
+        e.textContent = "Matched: " + ev.join(", ");
+        text.appendChild(e);
+      }
+
+      row.appendChild(box);
+      row.appendChild(text);
+      dataChecklist.appendChild(row);
+    }
+  };
+
   if (!r) {
     if (heuristicStatus) heuristicStatus.textContent = "No heuristic result yet. Refresh the page, then click Refresh.";
     if (heuristicScore) heuristicScore.textContent = "";
     if (heuristicLink) heuristicLink.textContent = "—";
     if (heuristicOpen) heuristicOpen.disabled = true;
     setReasons([]);
+    renderChecklist({}, {}, false);
     return;
   }
 
@@ -107,6 +178,9 @@ function renderHeuristic(els, r) {
   if (heuristicLink) heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
 
   setReasons(r.reasons || []);
+
+  // NEW: checklist rendering
+  renderChecklist(r.dataCollected || {}, r.dataEvidence || {}, !!r.isLikelyPolicyPage);
 
   if (heuristicOpen) {
     heuristicOpen.disabled = !r.bestPolicyLink;
@@ -242,6 +316,7 @@ async function init() {
     heuristicLink: document.getElementById("heuristic-link"),
     heuristicOpen: document.getElementById("heuristic-open"),
     heuristicReasons: document.getElementById("heuristic-reasons"),
+    dataChecklist: document.getElementById("data-checklist"),
   };
   const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
