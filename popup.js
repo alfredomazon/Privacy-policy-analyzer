@@ -57,13 +57,41 @@ async function getActiveTab() {
 }
 
 function renderHeuristic(els, r) {
-  const { heuristicStatus, heuristicScore, heuristicLink, heuristicOpen } = els;
+  const {
+    heuristicStatus,
+    heuristicScore,
+    heuristicLink,
+    heuristicOpen,
+    heuristicReasons,
+  } = els;
+
+  const setReasons = (items) => {
+    if (!heuristicReasons) return;
+    heuristicReasons.innerHTML = "";
+
+    const list = Array.isArray(items) ? items : [];
+    const take = list.slice(0, 6);
+
+    if (take.length === 0) {
+      const li = document.createElement("li");
+      li.textContent = "No strong signals found yet.";
+      heuristicReasons.appendChild(li);
+      return;
+    }
+
+    for (const txt of take) {
+      const li = document.createElement("li");
+      li.textContent = txt;
+      heuristicReasons.appendChild(li);
+    }
+  };
 
   if (!r) {
     if (heuristicStatus) heuristicStatus.textContent = "No heuristic result yet. Refresh the page, then click Refresh.";
     if (heuristicScore) heuristicScore.textContent = "";
     if (heuristicLink) heuristicLink.textContent = "—";
     if (heuristicOpen) heuristicOpen.disabled = true;
+    setReasons([]);
     return;
   }
 
@@ -73,8 +101,12 @@ function renderHeuristic(els, r) {
       : "Not a policy page (heuristic)";
   }
 
-  if (heuristicScore) heuristicScore.textContent = `Score: ${r.score}`;
+  const conf = r.confidence ? ` • ${r.confidence} confidence` : "";
+  if (heuristicScore) heuristicScore.textContent = `Score: ${r.score}/10${conf}`;
+
   if (heuristicLink) heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
+
+  setReasons(r.reasons || []);
 
   if (heuristicOpen) {
     heuristicOpen.disabled = !r.bestPolicyLink;
@@ -203,12 +235,13 @@ async function init() {
   const out = document.getElementById("out");
   const btn = document.getElementById("analyze");
 
-  // Heuristic UI elements (new)
+  // Heuristic UI elements (main focus)
   const heuristicEls = {
     heuristicStatus: document.getElementById("heuristic-status"),
     heuristicScore: document.getElementById("heuristic-score"),
     heuristicLink: document.getElementById("heuristic-link"),
     heuristicOpen: document.getElementById("heuristic-open"),
+    heuristicReasons: document.getElementById("heuristic-reasons"),
   };
   const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
