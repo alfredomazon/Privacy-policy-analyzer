@@ -3,73 +3,100 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Privacy Policy Analyzer</title>
+  <title>Policy Risk Analyzer</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
 
 <body>
   <div class="container">
-    <!-- SECTION 1: Toggle -->
-    <h1>GPT-5 Mini</h1>
 
-    <label class="switch">
-      <input id="gpt5-toggle" type="checkbox" />
-      <span class="slider"></span>
-    </label>
-
-    <div class="label">Enable GPT-5 mini for all clients</div>
-    <div id="status" class="status"></div>
-
-    <small class="note">
-      This toggle changes a local setting only. Server-side changes are required to actually enable the model for clients.
-    </small>
-
-    <hr />
-
-    <!-- SECTION 2: Server Config (optional sync + token storage) -->
-    <div class="server-block">
-      <h2>Server (optional)</h2>
-
-      <label class="small" for="server-url">Server URL</label>
-      <input id="server-url" placeholder="https://your-service.onrender.com" />
-
-      <label class="small" for="server-token">Admin token (optional)</label>
-      <input id="server-token" placeholder="admin-token" />
-
-      <label class="small-inline">
-        <input id="sync-checkbox" type="checkbox" />
-        Sync to server when toggled
-      </label>
-
-      <div id="server-status" class="status"></div>
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">🛡️</div>
+        <div>
+          <div class="brand-title">Policy Risk Analyzer</div>
+          <div class="brand-subtitle">TOS / Privacy quick scan</div>
+        </div>
+      </div>
+      <div class="pill" id="pill-status">Ready</div>
     </div>
 
-    <hr />
+    <!-- Toggle Card -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Analyzer Toggle</div>
+          <div class="card-sub">Local switch (can optionally sync server)</div>
+        </div>
 
-    <!-- SECTION 3: Analyzer -->
-    <h2>Privacy Policy Analyzer</h2>
+        <label class="switch" title="Enable/disable analyzer locally">
+          <input id="gpt5-toggle" type="checkbox" />
+          <span class="slider"></span>
+        </label>
+      </div>
 
-    <label class="small" for="token">Extension Token</label>
-    <input id="token" placeholder="paste X-Extension-Token here" />
-    <small class="note">Stored locally in your browser.</small>
+      <div class="row">
+        <div class="muted">Local status:</div>
+        <div id="status" class="mono">Loading…</div>
+      </div>
+    </div>
 
-    <label class="small" for="text">Policy text</label>
-    <textarea id="text" placeholder="Paste privacy policy text here..."></textarea>
+    <!-- Server Config (optional) -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Server (optional)</div>
+          <div class="card-sub">Use Render + token to enable backend + analyze</div>
+        </div>
+      </div>
 
-    <button id="analyze">Analyze</button>
+      <label class="small" for="server-url">Server URL</label>
+      <input id="server-url" class="input" placeholder="https://your-service.onrender.com" />
 
-    <button id="auto-analyze">Analyze Current Site</button>
-<small class="note">
-  Automatically finds policy links and extracts text.
-</small>
+      <label class="small" for="server-token">Admin token (optional)</label>
+      <input id="server-token" class="input" placeholder="admin-token" />
 
-    <pre id="out">Output will appear here…</pre>
+      <label class="check">
+        <input id="sync-checkbox" type="checkbox" />
+        <span>Sync server toggle when changed</span>
+      </label>
+
+      <div id="server-status" class="help"></div>
+    </div>
+
+    <!-- Analyzer -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Analyze</div>
+          <div class="card-sub">Manual paste or auto-detect policy links</div>
+        </div>
+      </div>
+
+      <label class="small" for="token">Extension Token</label>
+      <input id="token" class="input" placeholder="paste X-Extension-Token here" />
+      <div class="help">Stored locally in your browser.</div>
+
+      <label class="small" for="text">Policy text (optional)</label>
+      <textarea id="text" class="textarea" placeholder="Paste privacy policy text here (manual mode)..."></textarea>
+
+      <div class="btn-row">
+        <button id="auto-analyze" class="btn primary">Analyze Current Site</button>
+        <button id="analyze" class="btn ghost">Analyze Pasted Text</button>
+      </div>
+
+      <div id="risk-badge" class="risk hidden">Risk: —</div>
+      <pre id="out" class="output">Output will appear here…</pre>
+
+      <div class="footer-note">
+        Prototype analysis. Results are automated and may contain inaccuracies.
+      </div>
+    </div>
+
   </div>
 
-  <!-- Toasts should exist BEFORE popup.js runs -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
-
-  <!-- Load script ONCE -->
   <script src="popup.js"></script>
 </body>
 </html>
