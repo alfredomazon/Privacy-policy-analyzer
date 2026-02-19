@@ -1,27 +1,151 @@
-:root{--bg:#fff;--muted:#666;--accent:#2b7cff}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:#111; margin:0; padding:12px; width:260px}
+:root{
+  --bg:#fff;
+  --muted:#666;
+  --accent:#2b7cff;
+  --card:#f7f9ff;
+  --border:#e8ecf6;
+}
+
+body{
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  background:var(--bg);
+  color:#111;
+  margin:0;
+  padding:12px;
+  width:260px;
+}
+
 .container{text-align:center}
+
 h1{font-size:16px;margin:0 0 12px}
+h2{font-size:13px;margin:6px 0}
+
+/* MAIN heuristic block (primary card) */
+.heuristic-block{
+  text-align:left;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+}
+
+#heuristic-status{
+  margin-top:0;
+  font-weight:600;
+}
+
+#heuristic-score{
+  margin-top:6px;
+}
+
+#heuristic-link{
+  margin-top:6px;
+  line-height:1.25;
+}
+
+/* Toggle */
 .switch{display:inline-block;position:relative}
 .switch input{display:none}
-.slider{width:56px;height:30px;background:#ccc;border-radius:30px;display:inline-block;position:relative;vertical-align:middle;cursor:pointer;transition:background .18s}
-.slider:before{content:'';position:absolute;left:4px;top:4px;width:22px;height:22px;background:#fff;border-radius:50%;transition:transform .18s}
+.slider{
+  width:56px;height:30px;background:#ccc;border-radius:30px;
+  display:inline-block;position:relative;vertical-align:middle;
+  cursor:pointer;transition:background .18s
+}
+.slider:before{
+  content:'';position:absolute;left:4px;top:4px;
+  width:22px;height:22px;background:#fff;border-radius:50%;
+  transition:transform .18s
+}
 input:checked + .slider{background:var(--accent)}
 input:checked + .slider:before{transform:translateX(26px)}
+
 .label{margin-top:8px;font-size:13px;color:var(--muted)}
 .status{margin-top:8px;font-size:13px}
 .note{display:block;margin-top:10px;color:var(--muted);font-size:11px}
 hr{margin:12px 0;border:none;border-top:1px solid #eee}
+
+/* Inputs */
 .server-block{margin-top:8px;text-align:left}
 .server-block h2{font-size:13px;margin:6px 0}
-.server-block input{width:100%;box-sizing:border-box;padding:6px;margin:6px 0;border:1px solid #ddd;border-radius:6px}
+.server-block input{
+  width:100%;
+  box-sizing:border-box;
+  padding:7px 8px;
+  margin:6px 0;
+  border:1px solid #ddd;
+  border-radius:8px;
+  outline:none;
+}
+.server-block input:focus{border-color:var(--accent)}
+
 .small{font-size:12px;color:var(--muted);display:block;margin-top:6px}
 .small-inline{font-size:12px;color:var(--muted);display:block;margin-top:6px}
 .server-block .status{font-size:12px;color:var(--muted)}
-/* Toasts */
-.toast-container{position:fixed;left:12px;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px;pointer-events:none;z-index:9999}
-.toast{pointer-events:auto;padding:8px 12px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.08);opacity:0;transform:translateY(6px);transition:all .22s;font-size:13px}
-.toast.visible{opacity:1;transform:none}
-.toast.info{background:#f0f6ff;color:#0b4ea2}
-.toast.success{background:#e9ffef;color:#046a2e}
-.toast.error{background:#ffecec;color:#7a0b0b}
+
+/* Analyzer fields (secondary section look) */
+textarea{
+  width:100%;
+  box-sizing:border-box;
+  padding:8px;
+  margin-top:6px;
+  border:1px solid #ddd;
+  border-radius:10px;
+  min-height:90px;
+  resize:vertical;
+  font-family:inherit;
+  font-size:12px;
+  outline:none;
+}
+textarea:focus{border-color:var(--accent)}
+
+input#token{
+  width:100%;
+  box-sizing:border-box;
+  padding:7px 8px;
+  margin:6px 0;
+  border:1px solid #ddd;
+  border-radius:8px;
+  outline:none;
+}
+input#token:focus{border-color:var(--accent)}
+
+/* Buttons */
+button{
+  width:100%;
+  box-sizing:border-box;
+  padding:9px 10px;
+  margin-top:8px;
+  border-radius:10px;
+  border:1px solid #d6def2;
+  background:#fff;
+  cursor:pointer;
+  font-weight:600;
+  font-size:13px;
+  transition:transform .06s, border-color .16s, background .16s;
+}
+button:hover{border-color:var(--accent)}
+button:active{transform:translateY(1px)}
+button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
+/* Make the top heuristic buttons sit side-by-side nicely */
+.heuristic-block button{
+  width:50%;
+  margin-top:0;
+}
+
+/* Primary vs secondary emphasis */
+#heuristic-open{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+#heuristic-open:disabled{
+  background:#b8cff7;
+  border-color:#b8cff7;
+  color:#fff;
+}
+
+#analyze, #auto-anal

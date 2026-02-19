@@ -50,6 +50,142 @@ function syncToServer({ serverStatusEl, toastContainer }, url, token, enabled) {
     });
 }
 
+// ---------- Heuristic UI helpers ----------
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+function renderHeuristic(els, r) {
+  const { heuristicStatus, heuristicScore, heuristicLink, heuristicOpen } = els;
+
+  if (!r) {
+    if (heuristicStatus) heuristicStatus.textContent = "No heuristic result yet. Refresh the page, then click Refresh.";
+    if (heuristicScore) heuristicScore.textContent = "";
+    if (heuristicLink) heuristicLink.textContent = "—";
+    if (heuristicOpen) heuristicOpen.disabled = true;
+    return;
+  }
+
+  if (heuristicStatus) {
+    heuristicStatus.textContent = r.isLikelyPolicyPage
+      ? "This page looks like a Privacy Policy ✅"
+      : "Not a policy page (heuristic)";
+  }
+
+  if (heuristicScore) heuristicScore.textContent = `Score: ${r.score}`;
+  if (heuristicLink) heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
+
+  if (heuristicOpen) {
+    heuristicOpen.disabled = !r.bestPolicyLink;
+    heuristicOpen.onclick = () => {
+      if (r.bestPolicyLink) chrome.tabs.create({ url: r.bestPolicyLink });
+    };
+  }
+}
+
+async function loadHeuristicIntoPopup(els) {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    renderHeuristic(els, null);
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "getHeuristic", tabId: tab.id }, (res) => {
+      const r = res?.result || null;
+      renderHeuristic(els, r);
+      resolve(r);
+    });
+  });
+}
+
+// ===== AUTO ANALYZE helpers (GPT enhanced) =====
+
+// Fallback: Find likely policy links from the active tab (DOM scan)
+async function findPolicyLinksFromActiveTab() {
+  const tab = await getActiveTab();
+  if (!tab?.id) return [];
+
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const keywords = ["privacy", "terms", "policy", "legal", "tos", "conditions"];
+      const anchors = Array.from(document.querySelectorAll("a[href]"));
+
+      const urls = anchors
+        .map(a => {
+          const text = (a.innerText || "").toLowerCase();
+          const href = a.getAttribute("href") || "";
+          const hay = `${text} ${href}`.toLowerCase();
+
+          if (!keywords.some(k => hay.includes(k))) return null;
+
+          try {
+            return new URL(href, window.location.href).toString();
+          } catch {
+            return null;
+          }
+        })
+        .filter(u => u && /^https?:\/\//i.test(u));
+
+      return Array.from(new Set(urls)).slice(0, 3);
+    }
+  });
+
+  return result || [];
+}
+
+// Fetch and clean text from a URL
+async function extractTextFromUrl(url) {
+  const res = await fetch(url);
+  const html = await res.text();
+
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("script, style, noscript, svg, img").forEach(e => e.remove());
+
+  return (doc.body?.innerText || "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Select important paragraphs and cap size
+function selectImportantParagraphs(text, limit = 45000) {
+  const keywords = [
+    "collect","collection","use","share","sharing","third party","retain","retention",
+    "sell","advertis","cookie","tracking","location","biometric","children",
+    "opt out","delete","deletion","access","rights","gdpr","ccpa","california"
+  ];
+
+  const paras = text
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(p => p.length > 30);
+
+  const scored = paras.map(p => {
+    const lower = p.toLowerCase();
+    let score = 0;
+
+    for (const k of keywords) {
+      if (lower.includes(k)) score += 1;
+    }
+
+    score += Math.min(2, p.length / 800);
+
+    return { p, score };
+  }).sort((a, b) => b.score - a.score);
+
+  let outText = "";
+
+  for (const { p } of scored) {
+    if (outText.length + p.length + 2 > limit) continue;
+    outText += (outText ? "\n\n" : "") + p;
+    if (outText.length >= limit) break;
+  }
+
+  return outText.length ? outText : text.slice(0, limit);
+}
+
 async function init() {
   // Grab DOM elements AFTER the popup loads
   const checkbox = document.getElementById("gpt5-toggle");
@@ -66,6 +202,25 @@ async function init() {
   const textArea = document.getElementById("text");
   const out = document.getElementById("out");
   const btn = document.getElementById("analyze");
+
+  // Heuristic UI elements (new)
+  const heuristicEls = {
+    heuristicStatus: document.getElementById("heuristic-status"),
+    heuristicScore: document.getElementById("heuristic-score"),
+    heuristicLink: document.getElementById("heuristic-link"),
+    heuristicOpen: document.getElementById("heuristic-open"),
+  };
+  const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
+
+  // ---- 0) Load heuristic result (MAIN focus) ----
+  let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
+
+  if (heuristicRefreshBtn) {
+    heuristicRefreshBtn.addEventListener("click", async () => {
+      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
+      showToast(toastContainer, "Heuristic refreshed", "info");
+    });
+  }
 
   // ---- 1) Load toggle state from background + local server settings ----
   if (checkbox && statusEl) {
@@ -159,154 +314,63 @@ async function init() {
       });
     });
   }
-  // ===== AUTO ANALYZE: detect + extract policy text =====
 
-// Find likely policy links from the active tab
-async function findPolicyLinksFromActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // ---- 6) Auto-analyze (Enhanced GPT) ----
+  const autoBtn = document.getElementById("auto-analyze");
+  if (autoBtn && out) {
+    autoBtn.addEventListener("click", async () => {
+      try {
+        out.textContent = "Preparing enhanced analysis...";
 
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => {
-      const keywords = ["privacy", "terms", "policy", "legal", "tos", "conditions"];
+        // Refresh heuristic before using it
+        latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
 
-      const anchors = Array.from(document.querySelectorAll("a"));
+        let links = [];
 
-      const urls = anchors
-        .map(a => {
-          const text = (a.innerText || "").toLowerCase();
-          const href = a.getAttribute("href") || "";
-          const hay = `${text} ${href}`.toLowerCase();
-
-          if (!keywords.some(k => hay.includes(k))) return null;
-
-          try {
-            return new URL(href, window.location.href).toString();
-          } catch {
-            return null;
+        // Prefer heuristic best link if available
+        if (latestHeuristic?.bestPolicyLink) {
+          links = [latestHeuristic.bestPolicyLink];
+          out.textContent = "Using heuristic policy link:\n" + links[0] + "\n\nFetching text...";
+        } else {
+          out.textContent = "No heuristic policy link found. Scanning page links...";
+          links = await findPolicyLinksFromActiveTab();
+          if (!links.length) {
+            out.textContent = "No privacy/terms links found. Try manual paste.";
+            return;
           }
-        })
-        .filter(u => u && /^https?:\/\//i.test(u));
-
-      return Array.from(new Set(urls)).slice(0, 3);
-    }
-  });
-
-  return result || [];
-}
-
-// Fetch and clean text from a URL
-async function extractTextFromUrl(url) {
-  const res = await fetch(url);
-  const html = await res.text();
-
-  const doc = new DOMParser().parseFromString(html, "text/html");
-
-  doc.querySelectorAll("script, style, noscript, svg, img").forEach(e => e.remove());
-
-  return (doc.body?.innerText || "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-// Select important paragraphs and cap size
-function selectImportantParagraphs(text, limit = 45000) {
-  const keywords = [
-    "collect","collection","use","share","sharing","third party","retain","retention",
-    "sell","advertis","cookie","tracking","location","biometric","children",
-    "opt out","delete","deletion","access","rights","gdpr","ccpa","california"
-  ];
-
-  const paras = text
-    .split(/\n\s*\n/)
-    .map(p => p.trim())
-    .filter(p => p.length > 30);
-
-  const scored = paras.map(p => {
-    const lower = p.toLowerCase();
-    let score = 0;
-
-    for (const k of keywords) {
-      if (lower.includes(k)) score += 1;
-    }
-
-    score += Math.min(2, p.length / 800);
-
-    return { p, score };
-  }).sort((a, b) => b.score - a.score);
-
-  let outText = "";
-
-  for (const { p } of scored) {
-    if (outText.length + p.length + 2 > limit) continue;
-
-    outText += (outText ? "\n\n" : "") + p;
-
-    if (outText.length >= limit) break;
-  }
-
-  return outText.length ? outText : text.slice(0, limit);
-}
-
-// Auto-analyze button handler
-const autoBtn = document.getElementById("auto-analyze");
-
-if (autoBtn && out) {
-  autoBtn.addEventListener("click", async () => {
-    try {
-      out.textContent = "Finding policy links on current site...";
-
-      const links = await findPolicyLinksFromActiveTab();
-
-      if (!links.length) {
-        out.textContent = "No privacy/terms links found. Try manual paste.";
-        return;
-      }
-
-      out.textContent =
-        "Found links:\n" + links.join("\n") + "\n\nFetching text...";
-
-      let combined = "";
-
-      for (const link of links) {
-        try {
-          const text = await extractTextFromUrl(link);
-
-          combined += `\n\nSOURCE: ${link}\n\n${text}`;
-        } catch {
-          combined += `\n\nSOURCE: ${link}\n\n[Failed to fetch]`;
+          out.textContent = "Found links:\n" + links.join("\n") + "\n\nFetching text...";
         }
-      }
 
-      const trimmed = selectImportantParagraphs(combined, 45000);
+        let combined = "";
+        for (const link of links) {
+          try {
+            const text = await extractTextFromUrl(link);
+            combined += `\n\nSOURCE: ${link}\n\n${text}`;
+          } catch (e) {
+            combined += `\n\nSOURCE: ${link}\n\n[Failed to fetch]`;
+          }
+        }
 
-      out.textContent = "Sending extracted text to analyzer...";
+        const trimmed = selectImportantParagraphs(combined, 45000);
 
-      chrome.runtime.sendMessage(
-        { type: "analyzePolicy", text: trimmed },
-        (res) => {
+        out.textContent = "Sending extracted text to analyzer...";
+
+        chrome.runtime.sendMessage({ type: "analyzePolicy", text: trimmed }, (res) => {
           if (!res) {
             out.textContent = "No response from background.";
             return;
           }
-
           if (!res.ok) {
-            out.textContent =
-              `Error: ${res.error}\n\n` +
-              JSON.stringify(res.details || {}, null, 2);
+            out.textContent = `Error: ${res.error}\n\n${JSON.stringify(res.details || {}, null, 2)}`;
             return;
           }
-
           out.textContent = JSON.stringify(res.data, null, 2);
-        }
-      );
-    } catch (err) {
-      out.textContent =
-        "Auto-analyze failed: " + (err?.message || String(err));
-    }
-  });
-}
-
+        });
+      } catch (err) {
+        out.textContent = "Auto-analyze failed: " + (err?.message || String(err));
+      }
+    });
+  }
 }
 
 // Run once, after DOM exists

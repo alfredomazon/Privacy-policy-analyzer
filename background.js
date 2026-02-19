@@ -6,6 +6,9 @@ const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
 // MUST match what popup.js saves for the extension token input:
 const TOKEN_KEY = "gpt5ExtensionToken";
 
+// --- Heuristic cache (per tab) ---
+const HEURISTIC_BY_TAB = {};
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get([TOGGLE_KEY], (res) => {
     if (res[TOGGLE_KEY] === undefined) {
@@ -17,7 +20,30 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
 
+  // ==============================
+  // 0) Content script sends heuristic result
+  // ==============================
+  if (msg.type === "heuristicResult") {
+    const tabId = sender.tab?.id;
+    if (tabId != null) {
+      HEURISTIC_BY_TAB[tabId] = msg.result;
+    }
+    // no response needed
+    return;
+  }
+
+  // ==============================
+  // 0.5) Popup asks for heuristic result
+  // ==============================
+  if (msg.type === "getHeuristic") {
+    const tabId = msg.tabId;
+    sendResponse({ ok: true, result: HEURISTIC_BY_TAB[tabId] || null });
+    return true;
+  }
+
+  // ==============================
   // 1) popup asks: what's toggle state?
+  // ==============================
   if (msg.type === "getStatus") {
     chrome.storage.local.get([TOGGLE_KEY], (res) => {
       sendResponse({ enabled: !!res[TOGGLE_KEY] });
@@ -25,7 +51,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // ==============================
   // 2) popup says: set toggle state
+  // ==============================
   if (msg.type === "setStatus") {
     chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
       sendResponse({ ok: true });
@@ -33,7 +61,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // 3) popup says: analyze this text
+  // ==============================
+  // 3) popup says: analyze this text (GPT mode)
+  // ==============================
   if (msg.type === "analyzePolicy") {
     (async () => {
       try {

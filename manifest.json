@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Privacy Policy Analyzer",
   "version": "0.1.0",
-  "description": "Toggle 'Enable GPT-5 mini for all clients' (UI only).",
+  "description": "Heuristic privacy policy detector + optional GPT analysis.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -15,5 +15,12 @@
     "service_worker": "background.js"
   },
   "permissions": ["storage", "activeTab", "scripting"],
-  "host_permissions": ["<all_urls>"]
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
 }
