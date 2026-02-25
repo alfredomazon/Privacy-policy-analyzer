@@ -10,10 +10,10 @@ const HEURISTIC_BY_TAB = {};
 // --- Toolbar icons (use PNG for best reliability) ---
 const ICONS = {
   blue: {
-    16: "icons/EvilEye.png",
-    // 32: "icons/EvilEye32.png",
-    // 48: "icons/EvilEye48.png",
-    // 128: "icons/EvilEye128.png",
+    16: "icons/EvilEye16.png",
+    32: "icons/EvilEye16.png",
+    48: "icons/EvilEye128.png",
+    128: "icons/EvilEye128.png",
   },
   yellow: {
     16: "icons/EvilEyeYellow.png",
