@@ -269,4 +269,46 @@ function detectPrivacyHeuristic() {
 }
 
 // send once per load
-chrome.runtime.sendMessage({ type: "heuristicResult", result: detectPrivacyHeuristic() });
+const heuristic = detectPrivacyHeuristic();
+
+// --- map heuristic -> toolbar state ---
+function computeRiskFromHeuristic(h) {
+  // If we are *on* a policy page, risk is about tracking/sharing/sensitive terms.
+  // If we are *not* on a policy page, show neutral (blue) and encourage click/open.
+  if (!h.isLikelyPolicyPage) {
+    return { level: "blue", riskScore: 10, issuesCount: 0 };
+  }
+
+  // Count “suspicious” categories (you can tune these)
+  const suspiciousCats = [
+    "cookies_tracking",
+    "sharing_third_parties",
+    "sensitive",
+    "biometric",
+    "children"
+  ];
+
+  const found = h.dataCollected || {};
+  const issuesCount = suspiciousCats.reduce((n, k) => n + (found[k] ? 1 : 0), 0);
+
+  // Risk score 0–100 (simple, tune as you like)
+  // Base on issues + policy confidence
+  let riskScore = issuesCount * 22; // 0..110-ish
+  if (h.confidence === "High") riskScore += 10;
+  if (h.confidence === "Low") riskScore -= 10;
+  riskScore = Math.max(0, Math.min(100, riskScore));
+
+  const level = riskScore >= 70 ? "red" : riskScore >= 35 ? "yellow" : "blue";
+  return { level, riskScore, issuesCount };
+}
+
+const { level, riskScore, issuesCount } = computeRiskFromHeuristic(heuristic);
+
+chrome.runtime.sendMessage({
+  type: "heuristicResult",
+  result: heuristic,
+  // extra fields for the toolbar icon logic
+  level,        // "blue" | "yellow" | "red"
+  riskScore,    // 0..100
+  issuesCount   // small integer for badge
+});

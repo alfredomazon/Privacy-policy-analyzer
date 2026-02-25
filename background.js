@@ -2,12 +2,102 @@
 
 const TOGGLE_KEY = "gpt5Enabled";
 const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
-
-// MUST match what popup.js saves for the extension token input:
 const TOKEN_KEY = "gpt5ExtensionToken";
 
 // --- Heuristic cache (per tab) ---
 const HEURISTIC_BY_TAB = {};
+
+// --- Toolbar icons (use PNG for best reliability) ---
+const ICONS = {
+  blue: {
+    16: "icons/EvilEye.png",
+    // 32: "icons/EvilEye32.png",
+    // 48: "icons/EvilEye48.png",
+    // 128: "icons/EvilEye128.png",
+  },
+  yellow: {
+    16: "icons/EvilEyeYellow.png",
+    // 32: "icons/EvilEyeYellow32.png",
+    // 48: "icons/EvilEyeYellow48.png",
+    // 128: "icons/EvilEyeYellow128.png",
+  },
+  red: {
+    16: "icons/EvilEyeRed.png",
+    // 32: "icons/EvilEyeRed32.png",
+    // 48: "icons/EvilEyeRed48.png",
+    // 128: "icons/EvilEyeRed128.png",
+  },
+};
+
+function scoreToLevel(score) {
+  if (score >= 70) return "red";
+  if (score >= 35) return "yellow";
+  return "blue";
+}
+
+// If you don't have a "riskScore" yet, this converts your heuristic into one.
+// Tune this later.
+function computeFromHeuristic(result) {
+  if (!result) return { score: 0, issuesCount: 0 };
+
+  // If not on a policy page, keep it neutral/blue.
+  if (!result.isLikelyPolicyPage) return { score: 10, issuesCount: 0 };
+
+  const found = result.dataCollected || {};
+
+  const suspiciousCats = [
+    "cookies_tracking",
+    "sharing_third_parties",
+    "sensitive",
+    "biometric",
+    "children",
+  ];
+
+  const issuesCount = suspiciousCats.reduce((n, k) => n + (found[k] ? 1 : 0), 0);
+
+  // Simple score (0..100). Tune to your liking.
+  let score = issuesCount * 22;
+  if (result.confidence === "High") score += 10;
+  if (result.confidence === "Low") score -= 10;
+  score = Math.max(0, Math.min(100, score));
+
+  return { score, issuesCount };
+}
+
+async function setToolbar(tabId, { score, issuesCount = 0 }) {
+  const level = scoreToLevel(score);
+
+  await chrome.action.setIcon({ tabId, path: ICONS[level] });
+
+  await chrome.action.setBadgeText({
+    tabId,
+    text: issuesCount ? String(Math.min(issuesCount, 99)) : "",
+  });
+
+  await chrome.action.setBadgeBackgroundColor({
+    tabId,
+    color: level === "red" ? "#D93025" : level === "yellow" ? "#F9AB00" : "#1A73E8",
+  });
+
+  await chrome.action.setTitle({
+    tabId,
+    title:
+      level === "red"
+        ? `High risk: ${issuesCount} flags — click to review`
+        : level === "yellow"
+        ? `Caution: ${issuesCount} flags — click to review`
+        : `Low risk — click to view analysis`,
+  });
+}
+
+// Optional: show “Analyzing…” while page loads
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === "loading") {
+    chrome.action.setIcon({ tabId, path: ICONS.blue });
+    chrome.action.setBadgeText({ tabId, text: "" });
+    chrome.action.setTitle({ tabId, title: "Analyzing…" });
+  }
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get([TOGGLE_KEY], (res) => {
@@ -27,9 +117,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     if (tabId != null) {
       HEURISTIC_BY_TAB[tabId] = msg.result;
+
+      // Update toolbar icon based on heuristic
+      const { score, issuesCount } = computeFromHeuristic(msg.result);
+      setToolbar(tabId, { score, issuesCount });
     }
-    // no response needed
-    return;
+    return; // no response needed
   }
 
   // ==============================
@@ -67,14 +160,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "analyzePolicy") {
     (async () => {
       try {
-        // (Optional) block analyze if your toggle is off
         const toggleRes = await chrome.storage.local.get([TOGGLE_KEY]);
         if (!toggleRes[TOGGLE_KEY]) {
           sendResponse({ ok: false, error: "Analyzer is disabled. Turn it on first." });
           return;
         }
 
-        // get extension token from storage (same place popup saves it)
         const stored = await chrome.storage.local.get([TOKEN_KEY]);
         const token = stored[TOKEN_KEY];
 
