@@ -22,7 +22,7 @@ const ICONS = {
     128: "icons/EvilEyeYellow128.png",
   },
   red: {
-    16: "icons/EvilEyeRed.png",
+    16: "icons/EvilEyeRed16.png",
     32: "icons/EvilEyeRed16.png",
     48: "icons/EvilEyeRed128.png",
     128: "icons/EvilEyeRed128.png",
