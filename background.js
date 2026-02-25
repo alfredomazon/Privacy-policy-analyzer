@@ -16,16 +16,16 @@ const ICONS = {
     128: "icons/EvilEye128.png",
   },
   yellow: {
-    16: "icons/EvilEyeYellow.png",
-    // 32: "icons/EvilEyeYellow32.png",
-    // 48: "icons/EvilEyeYellow48.png",
-    // 128: "icons/EvilEyeYellow128.png",
+    16: "icons/EvilEyeYellow16.png",
+    32: "icons/EvilEyeYellow16.png",
+    48: "icons/EvilEyeYellow128.png",
+    128: "icons/EvilEyeYellow128.png",
   },
   red: {
     16: "icons/EvilEyeRed.png",
-    // 32: "icons/EvilEyeRed32.png",
-    // 48: "icons/EvilEyeRed48.png",
-    // 128: "icons/EvilEyeRed128.png",
+    32: "icons/EvilEyeRed16.png",
+    48: "icons/EvilEyeRed128.png",
+    128: "icons/EvilEyeRed128.png",
   },
 };
 
