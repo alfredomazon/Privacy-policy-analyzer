@@ -10,7 +10,10 @@
       "48": "icons/EvilEye128.png",
       "128": "icons/EvilEye128.png"
     }
+    
   },
+
+
   "background": {
     "service_worker": "background.js"
   },

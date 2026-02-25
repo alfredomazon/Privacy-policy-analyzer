@@ -11,20 +11,20 @@ const HEURISTIC_BY_TAB = {};
 const ICONS = {
   blue: {
     16: "icons/EvilEye16.png",
-    32: "icons/EvilEye16.png",
-    48: "icons/EvilEye128.png",
+    32: "icons/EvilEye32.png",
+    48: "icons/EvilEye48.png",
     128: "icons/EvilEye128.png",
   },
   yellow: {
     16: "icons/EvilEyeYellow16.png",
-    32: "icons/EvilEyeYellow16.png",
-    48: "icons/EvilEyeYellow128.png",
+    32: "icons/EvilEyeYellow32.png",
+    48: "icons/EvilEyeYellow48.png",
     128: "icons/EvilEyeYellow128.png",
   },
   red: {
     16: "icons/EvilEyeRed16.png",
-    32: "icons/EvilEyeRed16.png",
-    48: "icons/EvilEyeRed128.png",
+    32: "icons/EvilEyeRed32.png",
+    48: "icons/EvilEyeRed48.png",
     128: "icons/EvilEyeRed128.png",
   },
 };
