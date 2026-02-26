@@ -416,3 +416,41 @@ hr{
 .toast.info{ border-color: rgba(249,171,0,.45); }
 .toast.success{ border-color: rgba(77,163,255,.45); }
 .toast.error{ border-color: rgba(217,48,37,.55); }
+
+/* ===== Popup entrance animation ===== */
+
+body{
+  animation: popupFadeSlide .25s ease-out;
+}
+
+@keyframes popupFadeSlide{
+
+  from{
+    opacity:0;
+    transform: translateY(8px) scale(.98);
+  }
+
+  to{
+    opacity:1;
+    transform: translateY(0) scale(1);
+  }
+
+}
+
+.check-row{
+  animation: rowFade .35s ease;
+}
+
+@keyframes rowFade{
+
+  from{
+    opacity:0;
+    transform: translateY(4px);
+  }
+
+  to{
+    opacity:1;
+    transform: translateY(0);
+  }
+
+}
