@@ -260,3 +260,159 @@ pre#out{
 .toast.info{background:#f0f6ff;color:#0b4ea2}
 .toast.success{background:#e9ffef;color:#046a2e}
 .toast.error{background:#ffecec;color:#7a0b0b}
+
+/* ====== LIFE UPGRADE (overrides only, no layout changes) ====== */
+
+:root{
+  --bg0:#070A12;
+  --bg1:#0B1222;
+  --muted: rgba(255,255,255,.68);
+  --text: rgba(255,255,255,.92);
+
+  --accent:#4DA3FF;
+  --accent2:#1A73E8;
+
+  --card: rgba(255,255,255,.08);
+  --card2: rgba(255,255,255,.06);
+  --border: rgba(255,255,255,.14);
+}
+
+/* Background + type */
+body{
+  background:
+    radial-gradient(900px 360px at 15% 10%, rgba(77,163,255,.18), transparent 60%),
+    radial-gradient(900px 360px at 85% 20%, rgba(249,171,0,.10), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg0));
+  color: var(--text);
+  width: 320px; /* little more breathing room */
+}
+
+/* Headings */
+h1{
+  font-size: 16px;
+  letter-spacing: .2px;
+}
+h2{
+  color: rgba(255,255,255,.82);
+}
+
+/* Cards */
+.heuristic-block,
+.server-block,
+pre#out{
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  backdrop-filter: blur(10px);
+}
+
+/* Heuristic text */
+#heuristic-status{ color: rgba(255,255,255,.92); }
+#heuristic-score, #heuristic-link{ color: rgba(255,255,255,.82); }
+
+.reasons{
+  color: var(--muted);
+}
+
+/* Checklist rows */
+.check-row{
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.10);
+}
+.check-row:hover{
+  background: rgba(255,255,255,.06);
+}
+.check-box{
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.92);
+}
+.check-box.checked{
+  background: linear-gradient(180deg, rgba(77,163,255,.30), rgba(26,115,232,.18));
+  border-color: rgba(77,163,255,.55);
+  box-shadow: 0 0 0 3px rgba(77,163,255,.12);
+}
+.check-title{ color: rgba(255,255,255,.90); }
+.check-evidence{ color: rgba(255,255,255,.65); }
+.checklist-note{ color: var(--muted); }
+
+/* Toggle */
+.slider{
+  background: rgba(255,255,255,.18);
+  border: 1px solid rgba(255,255,255,.14);
+}
+.slider:before{
+  background: rgba(255,255,255,.92);
+}
+input:checked + .slider{
+  background: linear-gradient(180deg, rgba(77,163,255,.35), rgba(26,115,232,.20));
+  border-color: rgba(77,163,255,.55);
+}
+
+/* Inputs / textarea */
+.server-block input,
+input#token,
+input#server-url,
+input#server-token,
+textarea{
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.92);
+}
+.server-block input:focus,
+input#token:focus,
+input#server-url:focus,
+input#server-token:focus,
+textarea:focus{
+  border-color: rgba(77,163,255,.55);
+  box-shadow: 0 0 0 3px rgba(77,163,255,.12);
+}
+
+/* Buttons */
+button{
+  border: 1px solid rgba(77,163,255,.35);
+  background: linear-gradient(180deg, rgba(77,163,255,.22), rgba(26,115,232,.12));
+  color: rgba(255,255,255,.92);
+  box-shadow: 0 10px 20px rgba(0,0,0,.25);
+}
+button:hover{
+  border-color: rgba(77,163,255,.55);
+  box-shadow: 0 12px 24px rgba(0,0,0,.28), 0 0 0 3px rgba(77,163,255,.12);
+}
+#heuristic-open{
+  background: linear-gradient(180deg, rgba(77,163,255,.40), rgba(26,115,232,.18));
+  border-color: rgba(77,163,255,.60);
+}
+#heuristic-open:disabled{
+  background: rgba(77,163,255,.18);
+  border-color: rgba(77,163,255,.18);
+}
+
+/* Output */
+pre#out{
+  background: rgba(0,0,0,.28);
+  color: rgba(255,255,255,.85);
+  max-height: 260px;
+}
+
+/* Divider */
+hr{
+  border-top: 1px solid rgba(255,255,255,.12);
+}
+
+/* Labels / small text */
+.label, .status, .note, .small, .small-inline, .server-block .status{
+  color: var(--muted);
+}
+
+/* Toasts */
+.toast{
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.35);
+  color: rgba(255,255,255,.90);
+  box-shadow: 0 10px 24px rgba(0,0,0,.35);
+  backdrop-filter: blur(10px);
+}
+.toast.info{ border-color: rgba(249,171,0,.45); }
+.toast.success{ border-color: rgba(77,163,255,.45); }
+.toast.error{ border-color: rgba(217,48,37,.55); }
