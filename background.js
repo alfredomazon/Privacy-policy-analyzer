@@ -97,12 +97,13 @@ async function setToolbar(tabId, { score, issuesCount = 0 }) {
 // Show “Scanning…” while page is loading/navigating
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") {
-    chrome.action.setIcon({ tabId, path: ICONS.blue });
     chrome.action.setBadgeText({ tabId, text: "" });
     chrome.action.setTitle({ tabId, title: "Scanning..." });
+
+    // prevents stale popup data while new page loads
+    if (info.url) delete HEURISTIC_BY_TAB[tabId];
   }
 });
-
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete HEURISTIC_BY_TAB[tabId];
