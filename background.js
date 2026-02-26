@@ -7,199 +7,434 @@ const TOKEN_KEY = "gpt5ExtensionToken";
 // --- Heuristic cache (per tab) ---
 const HEURISTIC_BY_TAB = {};
 
-// --- Toolbar icons (use PNG for best reliability) ---
+
+// --- Toolbar icons ---
 const ICONS = {
+
   blue: {
+
     16: "icons/EvilEye16.png",
     32: "icons/EvilEye32.png",
     48: "icons/EvilEye48.png",
     128: "icons/EvilEye128.png",
+
   },
+
   yellow: {
+
     16: "icons/EvilEyeYellow16.png",
     32: "icons/EvilEyeYellow32.png",
     48: "icons/EvilEyeYellow48.png",
     128: "icons/EvilEyeYellow128.png",
+
   },
+
   red: {
+
     16: "icons/EvilEyeRed16.png",
     32: "icons/EvilEyeRed32.png",
     48: "icons/EvilEyeRed48.png",
     128: "icons/EvilEyeRed128.png",
-  },
+
+  }
+
 };
 
+
+// Convert numeric score into color level
 function scoreToLevel(score) {
+
   if (score >= 70) return "red";
+
   if (score >= 35) return "yellow";
+
   return "blue";
+
 }
 
-// If you don't have a "riskScore" yet, this converts your heuristic into one.
-// Tune this later.
+
+// Improved heuristic scoring logic
 function computeFromHeuristic(result) {
-  if (!result) return { score: 0, issuesCount: 0 };
 
-  // If not on a policy page, keep it neutral/blue.
-  if (!result.isLikelyPolicyPage) return { score: 10, issuesCount: 0 };
+  if (!result)
+    return { score: 0, issuesCount: 0 };
 
-  const found = result.dataCollected || {};
+
+  // NOT on policy page
+
+  if (!result.isLikelyPolicyPage) {
+
+    const strong =
+      result.bestPolicyLink &&
+      result.bestLinkScore >= 9;
+
+    return {
+
+      score: strong ? 40 : 0,
+      issuesCount: 0
+
+    };
+
+  }
+
 
   const suspiciousCats = [
+
     "cookies_tracking",
     "sharing_third_parties",
     "sensitive",
     "biometric",
     "children",
+
   ];
 
-  const issuesCount = suspiciousCats.reduce((n, k) => n + (found[k] ? 1 : 0), 0);
 
-  // Simple score (0..100). Tune to your liking.
+  const found = result.dataCollected || {};
+
+
+  const issuesCount =
+    suspiciousCats.reduce(
+      (n, k) => n + (found[k] ? 1 : 0),
+      0
+    );
+
+
   let score = issuesCount * 22;
-  if (result.confidence === "High") score += 10;
-  if (result.confidence === "Low") score -= 10;
-  score = Math.max(0, Math.min(100, score));
+
+
+  if (result.confidence === "High")
+    score += 10;
+
+
+  if (result.confidence === "Low")
+    score -= 10;
+
+
+  score =
+    Math.max(0, Math.min(100, score));
+
 
   return { score, issuesCount };
+
 }
 
+
+// Apply toolbar state
 async function setToolbar(tabId, { score, issuesCount = 0 }) {
+
   const level = scoreToLevel(score);
 
-  await chrome.action.setIcon({ tabId, path: ICONS[level] });
+
+  await chrome.action.setIcon({
+
+    tabId,
+    path: ICONS[level]
+
+  });
+
 
   await chrome.action.setBadgeText({
+
     tabId,
-    text: issuesCount ? String(Math.min(issuesCount, 99)) : "",
+    text: issuesCount
+      ? String(Math.min(issuesCount, 99))
+      : ""
+
   });
+
 
   await chrome.action.setBadgeBackgroundColor({
+
     tabId,
-    color: level === "red" ? "#D93025" : level === "yellow" ? "#F9AB00" : "#1A73E8",
+
+    color:
+
+      level === "red"
+        ? "#D93025"
+        : level === "yellow"
+        ? "#F9AB00"
+        : "#1A73E8"
+
   });
+
 
   await chrome.action.setTitle({
+
     tabId,
+
     title:
+
       level === "red"
         ? `High risk: ${issuesCount} flags — click to review`
+
         : level === "yellow"
-        ? `Caution: ${issuesCount} flags — click to review`
-        : `Low risk — click to view analysis`,
+        ? `Privacy policy detected — click to review`
+
+        : `No privacy policy detected yet`
+
   });
+
 }
 
-// Optional: show “Analyzing…” while page loads
+
+// Show scanning state during navigation
 chrome.tabs.onUpdated.addListener((tabId, info) => {
+
   if (info.status === "loading") {
-    chrome.action.setIcon({ tabId, path: ICONS.blue });
-    chrome.action.setBadgeText({ tabId, text: "" });
-    chrome.action.setTitle({ tabId, title: "Analyzing…" });
+
+    chrome.action.setIcon({
+      tabId,
+      path: ICONS.blue
+    });
+
+    chrome.action.setBadgeText({
+      tabId,
+      text: ""
+    });
+
+    chrome.action.setTitle({
+      tabId,
+      title: "Scanning page..."
+    });
+
   }
+
 });
 
+
+// Cleanup closed tabs
+chrome.tabs.onRemoved.addListener(tabId => {
+
+  delete HEURISTIC_BY_TAB[tabId];
+
+});
+
+
+// Initialize storage toggle
 chrome.runtime.onInstalled.addListener(() => {
+
   chrome.storage.local.get([TOGGLE_KEY], (res) => {
+
     if (res[TOGGLE_KEY] === undefined) {
-      chrome.storage.local.set({ [TOGGLE_KEY]: false });
+
+      chrome.storage.local.set({
+        [TOGGLE_KEY]: false
+      });
+
     }
+
   });
+
 });
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return;
 
-  // ==============================
-  // 0) Content script sends heuristic result
-  // ==============================
+// Main message handler
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+  if (!msg || !msg.type)
+    return;
+
+
+  // Heuristic result from content.js
+
   if (msg.type === "heuristicResult") {
+
     const tabId = sender.tab?.id;
+
     if (tabId != null) {
+
       HEURISTIC_BY_TAB[tabId] = msg.result;
 
-      // Update toolbar icon based on heuristic
-      const { score, issuesCount } = computeFromHeuristic(msg.result);
-      setToolbar(tabId, { score, issuesCount });
+
+      const { score, issuesCount } =
+        computeFromHeuristic(msg.result);
+
+
+      setToolbar(tabId, {
+        score,
+        issuesCount
+      });
+
     }
-    return; // no response needed
+
+    return;
+
   }
 
-  // ==============================
-  // 0.5) Popup asks for heuristic result
-  // ==============================
+
+  // Popup requests heuristic
+
   if (msg.type === "getHeuristic") {
+
     const tabId = msg.tabId;
-    sendResponse({ ok: true, result: HEURISTIC_BY_TAB[tabId] || null });
+
+    sendResponse({
+
+      ok: true,
+      result:
+        HEURISTIC_BY_TAB[tabId] || null
+
+    });
+
     return true;
+
   }
 
-  // ==============================
-  // 1) popup asks: what's toggle state?
-  // ==============================
+
+  // Get GPT toggle state
+
   if (msg.type === "getStatus") {
-    chrome.storage.local.get([TOGGLE_KEY], (res) => {
-      sendResponse({ enabled: !!res[TOGGLE_KEY] });
+
+    chrome.storage.local.get([TOGGLE_KEY], res => {
+
+      sendResponse({
+
+        enabled: !!res[TOGGLE_KEY]
+
+      });
+
     });
+
     return true;
+
   }
 
-  // ==============================
-  // 2) popup says: set toggle state
-  // ==============================
+
+  // Set GPT toggle state
+
   if (msg.type === "setStatus") {
-    chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
+
+    chrome.storage.local.set({
+
+      [TOGGLE_KEY]: !!msg.enabled
+
+    }, () => {
+
       sendResponse({ ok: true });
+
     });
+
     return true;
+
   }
 
-  // ==============================
-  // 3) popup says: analyze this text (GPT mode)
-  // ==============================
+
+  // GPT Analysis
+
   if (msg.type === "analyzePolicy") {
+
     (async () => {
+
       try {
-        const toggleRes = await chrome.storage.local.get([TOGGLE_KEY]);
+
+        const toggleRes =
+          await chrome.storage.local.get([TOGGLE_KEY]);
+
         if (!toggleRes[TOGGLE_KEY]) {
-          sendResponse({ ok: false, error: "Analyzer is disabled. Turn it on first." });
+
+          sendResponse({
+
+            ok: false,
+            error: "Analyzer disabled"
+
+          });
+
           return;
+
         }
 
-        const stored = await chrome.storage.local.get([TOKEN_KEY]);
+
+        const stored =
+          await chrome.storage.local.get([TOKEN_KEY]);
+
         const token = stored[TOKEN_KEY];
 
+
         if (!token) {
-          sendResponse({ ok: false, error: "Missing Extension Token. Paste it in the popup settings." });
+
+          sendResponse({
+
+            ok: false,
+            error: "Missing extension token"
+
+          });
+
           return;
+
         }
 
-        const r = await fetch(`${SERVER_URL}/analyze`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Extension-Token": token,
-          },
-          body: JSON.stringify({ text: msg.text }),
-        });
 
-        const data = await r.json().catch(() => null);
+        const r = await fetch(
+          `${SERVER_URL}/analyze`,
+          {
+
+            method: "POST",
+
+            headers: {
+
+              "Content-Type": "application/json",
+
+              "X-Extension-Token": token,
+
+            },
+
+            body: JSON.stringify({
+
+              text: msg.text
+
+            }),
+
+          }
+        );
+
+
+        const data =
+          await r.json().catch(() => null);
+
 
         if (!r.ok) {
+
           sendResponse({
+
             ok: false,
-            error: (data && data.error) ? data.error : `HTTP ${r.status}`,
-            details: data,
+            error:
+              data?.error ||
+              `HTTP ${r.status}`
+
           });
+
           return;
+
         }
 
-        sendResponse({ ok: true, data });
-      } catch (err) {
-        sendResponse({ ok: false, error: err?.message || String(err) });
+
+        sendResponse({
+
+          ok: true,
+          data
+
+        });
+
       }
+
+      catch (err) {
+
+        sendResponse({
+
+          ok: false,
+          error:
+            err?.message ||
+            String(err)
+
+        });
+
+      }
+
     })();
 
-    return true; // keep channel open
+
+    return true;
+
   }
+
 });
