@@ -1,38 +1,106 @@
+```html
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>GPT-5 Mini Toggle</title>
-  <link rel="stylesheet" href="popup.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy Analyzer</title>
+  <link rel="stylesheet" href="popup.css" />
 </head>
+
 <body>
   <div class="container">
-    <h1>GPT-5 Mini</h1>
+
+    <!-- SECTION 0: Heuristic (MAIN FOCUS) -->
+    <h1>Privacy Policy Detector</h1>
+
+    <div class="heuristic-block">
+      <div id="heuristic-status" class="status">Checking current page…</div>
+      <div id="heuristic-score" class="small"></div>
+
+      <div class="small" style="margin-top:10px;">Best privacy link</div>
+      <div id="heuristic-link" class="note" style="word-break: break-all;">—</div>
+
+      <!-- NEW: Reasons
+      <div class="small" style="margin-top:10px;">Why?</div>
+      <ul id="heuristic-reasons" class="reasons"></ul> -->
+
+      <div class="small" style="margin-top:10px;">Data types detected</div>
+<div id="data-checklist" class="checklist"></div>
+
+
+      <div class="row" style="display:flex; gap:8px; margin-top:10px;">
+        <button id="heuristic-open" disabled>Open Policy</button>
+        <button id="heuristic-refresh">Refresh</button>
+      </div>
+
+      <small class="note">
+        Fast heuristic scan (no GPT). GPT analysis is optional below.
+      </small>
+    </div>
+
+    <hr />
+
+    <!-- SECTION 1: Toggle -->
+    <h2>GPT-5 Mini</h2>
+
     <label class="switch">
-      <input id="gpt5-toggle" type="checkbox">
+      <input id="gpt5-toggle" type="checkbox" />
       <span class="slider"></span>
     </label>
+
     <div class="label">Enable GPT-5 mini for all clients</div>
     <div id="status" class="status"></div>
-    <small class="note">This toggle changes a local setting only. Server-side changes are required to actually enable the model for clients.</small>
-      <hr>
-      <div class="server-block">
-        <h2>Server (optional)</h2>
-        <label class="small">Server URL</label>
-        <input id="server-url" placeholder="http://localhost:3000" />
-        <label class="small">Admin token (optional)</label>
-        <input id="server-token" placeholder="admin-token" />
-        <label class="small-inline"><input id="sync-checkbox" type="checkbox"> Sync to server when toggled</label>
-        <div id="server-status" class="status"></div>
-      </div>
-      <hr>
-      <div class="analyzer-block">
-        <h2>Privacy Analyzer</h2>
-        <button id="analyzeBtn">Analyze Current Page</button>
-        <pre id="result" class="analyzer-result"></pre>
-      </div>
-  <script src="popup.js"></script>
+
+    <small class="note">
+      This toggle changes a local setting only. Server-side changes are required to actually enable the model for clients.
+    </small>
+
+    <hr />
+
+    <!-- SECTION 2: Server Config (optional sync + token storage) -->
+    <div class="server-block">
+      <h2>Server (optional)</h2>
+
+      <label class="small" for="server-url">Server URL</label>
+      <input id="server-url" placeholder="https://your-service.onrender.com" />
+
+      <label class="small" for="server-token">Admin token (optional)</label>
+      <input id="server-token" placeholder="admin-token" />
+
+      <label class="small-inline">
+        <input id="sync-checkbox" type="checkbox" />
+        Sync to server when toggled
+      </label>
+
+      <div id="server-status" class="status"></div>
+    </div>
+
+    <hr />
+
+    <!-- SECTION 3: Analyzer (optional GPT/enhanced) -->
+    <h2>Privacy Policy Analyzer (Enhanced)</h2>
+
+    <label class="small" for="token">Extension Token</label>
+    <input id="token" placeholder="paste X-Extension-Token here" />
+    <small class="note">Stored locally in your browser.</small>
+
+    <label class="small" for="text">Policy text</label>
+    <textarea id="text" placeholder="Paste privacy policy text here..."></textarea>
+
+    <button id="analyze">Analyze (GPT)</button>
+
+    <button id="auto-analyze">Analyze Current Site (GPT)</button>
+    <small class="note">
+      Finds policy links and extracts text, then runs GPT analysis.
+    </small>
+
+    <pre id="out">Output will appear here…</pre>
+  </div>
+
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="popup.js"></script>
 </body>
 </html>
+```

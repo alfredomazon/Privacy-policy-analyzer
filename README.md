@@ -1,11 +1,71 @@
-GPT-5 Mini Toggle (Chrome Extension - UI only)
+privacy-policy-analyzer
 
 What this extension does
 - Provides a popup UI with a toggle labeled "Enable GPT-5 mini for all clients".
 - Persists the setting locally using `chrome.storage.local` and exposes it to the background service worker via messages.
+- Chrome extension popup
+- User pastes privacy policy text
+- User clicks **Analyze**
+- Extension sends the text to https://privacy-policy-analyzer-1.onrender.com
+- Server calls OpenAI
+- Server returns structured results
+- Extension displays results
+
+System Architecture
+
+The project has **two main components**:
+
+### A) Chrome Extension (Frontend)
+Contains:
+- popup UI (`popup.html`, `popup.css`)
+- popup logic (`popup.js`)
+- background service worker (`background.js`)
+
+Responsibilities:
+- UI + user interaction
+- store token locally
+- send requests to server
+- show results
+
+### B) Node.js + Express Server (Backend)
+Contains:
+- Express server (`server/server.js`)
+- dependencies (`server/package.json`)
+
+Responsibilities:
+- validate incoming token
+- call OpenAI securely
+- return JSON response
+- rate-limit requests
+- allow optional server toggle `/status`
+
+---
 
 Important
-- This extension only stores and exposes a local setting; it does NOT perform any server-side changes to actually enable GPT-5 mini for clients. Enabling GPT-5 mini across clients requires changes on the server-side or admin control-plane and appropriate authentication.
+- This extension stores and exposes a local setting; Enabling GPT-5 mini across clients requires changes on the server-side or admin control-plane and appropriate authentication.
+
+
+Why it was built this Way
+
+### The key security issue
+If you put an OpenAI API key inside:
+
+- `popup.js`
+- `background.js`
+- `manifest.json`
+
+…then anyone can extract the key and drain your credits.
+
+### The correct solution
+Instead, the extension calls **https://privacy-policy-analyzer-1.onrender.com**, and the server calls OpenAI.
+
+This keeps your OpenAI key private and lets user control:
+
+- rate limits
+- abuse protection
+- enabling/disabling AI
+
+
 
 Load locally (unpacked)
 1. Open Chrome and navigate to `chrome://extensions`.
@@ -13,16 +73,3 @@ Load locally (unpacked)
 3. Click "Load unpacked" and select this folder (where `manifest.json` lives).
 4. Click the extension icon to open the popup and toggle the setting.
 
-Files
-- `manifest.json` — extension manifest (MV3).
-- `background.js` — service worker managing the `gpt5Enabled` setting.
-- `popup.html`, `popup.js`, `popup.css` — popup UI and logic.
-- `icons/` — placeholder SVG icons.
-
-Next steps (optional)
-- Wire the toggle to an authenticated admin API to enact server-side changes.
-- Replace placeholder icons with production PNGs.
-- Add telemetry or user confirmation flows if necessary.
- 
-Server demo
-- A simple demo admin server is included at `server/` that exposes `GET /status` and `POST /status` for toggling the flag. It requires an `X-Admin-Token` header when POSTing. See `server/README.md` for run instructions.

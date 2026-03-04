@@ -1,27 +1,456 @@
-:root{--bg:#fff;--muted:#666;--accent:#2b7cff}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:#111; margin:0; padding:12px; width:260px}
+:root{
+  --bg:#fff;
+  --muted:#666;
+  --accent:#2b7cff;
+  --card:#f7f9ff;
+  --border:#e8ecf6;
+}
+
+body{
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+  background:var(--bg);
+  color:#111;
+  margin:0;
+  padding:12px;
+  width:260px;
+}
+
 .container{text-align:center}
+
 h1{font-size:16px;margin:0 0 12px}
+h2{font-size:13px;margin:6px 0}
+
+/* MAIN heuristic block (primary card) */
+.heuristic-block{
+  text-align:left;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px;
+}
+
+#heuristic-status{
+  margin-top:0;
+  font-weight:600;
+}
+
+#heuristic-score{
+  margin-top:6px;
+}
+
+#heuristic-link{
+  margin-top:6px;
+  line-height:1.25;
+}
+
+/* NEW: reasons list */
+.reasons{
+  margin:6px 0 0;
+  padding-left:16px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.25;
+}
+.reasons li{ margin:4px 0; }
+.checklist{
+  margin-top:6px;
+}
+
+.check-row{
+  display:flex;
+  gap:8px;
+  align-items:flex-start;
+  padding:6px 6px;
+  border-radius:10px;
+}
+
+.check-row:hover{
+  background:rgba(0,0,0,0.03);
+}
+
+.check-box{
+  width:18px;
+  height:18px;
+  border-radius:6px;
+  border:1px solid #cfd7ef;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  margin-top:2px;
+  flex:0 0 18px;
+}
+
+.check-box.checked{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+
+.check-text{
+  flex:1;
+  min-width:0;
+}
+
+.check-title{
+  font-size:11px;
+  color:#111;
+  line-height:1.2;
+}
+
+.check-evidence{
+  margin-top:3px;
+  font-size:10px;
+  color:var(--muted);
+  line-height:1.2;
+  word-break:break-word;
+}
+
+.checklist-note{
+  font-size:11px;
+  color:var(--muted);
+  padding:6px 2px;
+  line-height:1.25;
+}
+
+
+/* Toggle */
 .switch{display:inline-block;position:relative}
 .switch input{display:none}
-.slider{width:56px;height:30px;background:#ccc;border-radius:30px;display:inline-block;position:relative;vertical-align:middle;cursor:pointer;transition:background .18s}
-.slider:before{content:'';position:absolute;left:4px;top:4px;width:22px;height:22px;background:#fff;border-radius:50%;transition:transform .18s}
+.slider{
+  width:56px;height:30px;background:#ccc;border-radius:30px;
+  display:inline-block;position:relative;vertical-align:middle;
+  cursor:pointer;transition:background .18s
+}
+.slider:before{
+  content:'';position:absolute;left:4px;top:4px;
+  width:22px;height:22px;background:#fff;border-radius:50%;
+  transition:transform .18s
+}
 input:checked + .slider{background:var(--accent)}
 input:checked + .slider:before{transform:translateX(26px)}
+
 .label{margin-top:8px;font-size:13px;color:var(--muted)}
 .status{margin-top:8px;font-size:13px}
 .note{display:block;margin-top:10px;color:var(--muted);font-size:11px}
 hr{margin:12px 0;border:none;border-top:1px solid #eee}
+
+/* Inputs */
 .server-block{margin-top:8px;text-align:left}
 .server-block h2{font-size:13px;margin:6px 0}
-.server-block input{width:100%;box-sizing:border-box;padding:6px;margin:6px 0;border:1px solid #ddd;border-radius:6px}
+.server-block input{
+  width:100%;
+  box-sizing:border-box;
+  padding:7px 8px;
+  margin:6px 0;
+  border:1px solid #ddd;
+  border-radius:8px;
+  outline:none;
+}
+.server-block input:focus{border-color:var(--accent)}
+
 .small{font-size:12px;color:var(--muted);display:block;margin-top:6px}
 .small-inline{font-size:12px;color:var(--muted);display:block;margin-top:6px}
 .server-block .status{font-size:12px;color:var(--muted)}
+
+/* Analyzer fields (secondary section look) */
+textarea{
+  width:100%;
+  box-sizing:border-box;
+  padding:8px;
+  margin-top:6px;
+  border:1px solid #ddd;
+  border-radius:10px;
+  min-height:90px;
+  resize:vertical;
+  font-family:inherit;
+  font-size:12px;
+  outline:none;
+}
+textarea:focus{border-color:var(--accent)}
+
+input#token,
+input#server-url,
+input#server-token{
+  width:100%;
+  box-sizing:border-box;
+  padding:7px 8px;
+  margin:6px 0;
+  border:1px solid #ddd;
+  border-radius:8px;
+  outline:none;
+}
+input#token:focus,
+input#server-url:focus,
+input#server-token:focus{border-color:var(--accent)}
+
+/* Buttons */
+button{
+  width:100%;
+  box-sizing:border-box;
+  padding:9px 10px;
+  margin-top:8px;
+  border-radius:10px;
+  border:1px solid #d6def2;
+  background:#fff;
+  cursor:pointer;
+  font-weight:600;
+  font-size:13px;
+  transition:transform .06s, border-color .16s, background .16s;
+}
+button:hover{border-color:var(--accent)}
+button:active{transform:translateY(1px)}
+button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
+/* Make the top heuristic buttons sit side-by-side nicely */
+.heuristic-block button{
+  width:50%;
+  margin-top:0;
+}
+
+/* Primary vs secondary emphasis */
+#heuristic-open{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+#heuristic-open:disabled{
+  background:#b8cff7;
+  border-color:#b8cff7;
+  color:#fff;
+}
+
+/* Output */
+pre#out{
+  text-align:left;
+  background:#fafafa;
+  border:1px solid #eee;
+  border-radius:10px;
+  padding:8px;
+  margin-top:10px;
+  white-space:pre-wrap;
+  word-break:break-word;
+  font-size:11px;
+  line-height:1.25;
+  max-height:220px;
+  overflow:auto;
+}
+
 /* Toasts */
-.toast-container{position:fixed;left:12px;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px;pointer-events:none;z-index:9999}
-.toast{pointer-events:auto;padding:8px 12px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.08);opacity:0;transform:translateY(6px);transition:all .22s;font-size:13px}
+.toast-container{
+  position:fixed;
+  left:12px;right:12px;bottom:12px;
+  display:flex;flex-direction:column;gap:8px;
+  pointer-events:none;z-index:9999
+}
+.toast{
+  pointer-events:auto;
+  padding:8px 12px;
+  border-radius:8px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.08);
+  opacity:0;
+  transform:translateY(6px);
+  transition:all .22s;
+  font-size:13px
+}
 .toast.visible{opacity:1;transform:none}
 .toast.info{background:#f0f6ff;color:#0b4ea2}
 .toast.success{background:#e9ffef;color:#046a2e}
 .toast.error{background:#ffecec;color:#7a0b0b}
+
+/* ====== LIFE UPGRADE (overrides only, no layout changes) ====== */
+
+:root{
+  --bg0:#070A12;
+  --bg1:#0B1222;
+  --muted: rgba(255,255,255,.68);
+  --text: rgba(255,255,255,.92);
+
+  --accent:#4DA3FF;
+  --accent2:#1A73E8;
+
+  --card: rgba(255,255,255,.08);
+  --card2: rgba(255,255,255,.06);
+  --border: rgba(255,255,255,.14);
+}
+
+/* Background + type */
+body{
+  background:
+    radial-gradient(900px 360px at 15% 10%, rgba(77,163,255,.18), transparent 60%),
+    radial-gradient(900px 360px at 85% 20%, rgba(249,171,0,.10), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg0));
+  color: var(--text);
+  width: 320px; /* little more breathing room */
+}
+
+/* Headings */
+h1{
+  font-size: 16px;
+  letter-spacing: .2px;
+}
+h2{
+  color: rgba(255,255,255,.82);
+}
+
+/* Cards */
+.heuristic-block,
+.server-block,
+pre#out{
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  backdrop-filter: blur(10px);
+}
+
+/* Heuristic text */
+#heuristic-status{ color: rgba(255,255,255,.92); }
+#heuristic-score, #heuristic-link{ color: rgba(255,255,255,.82); }
+
+.reasons{
+  color: var(--muted);
+}
+
+/* Checklist rows */
+.check-row{
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.10);
+}
+.check-row:hover{
+  background: rgba(255,255,255,.06);
+}
+.check-box{
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.92);
+}
+.check-box.checked{
+  background: linear-gradient(180deg, rgba(77,163,255,.30), rgba(26,115,232,.18));
+  border-color: rgba(77,163,255,.55);
+  box-shadow: 0 0 0 3px rgba(77,163,255,.12);
+}
+.check-title{ color: rgba(255,255,255,.90); }
+.check-evidence{ color: rgba(255,255,255,.65); }
+.checklist-note{ color: var(--muted); }
+
+/* Toggle */
+.slider{
+  background: rgba(255,255,255,.18);
+  border: 1px solid rgba(255,255,255,.14);
+}
+.slider:before{
+  background: rgba(255,255,255,.92);
+}
+input:checked + .slider{
+  background: linear-gradient(180deg, rgba(77,163,255,.35), rgba(26,115,232,.20));
+  border-color: rgba(77,163,255,.55);
+}
+
+/* Inputs / textarea */
+.server-block input,
+input#token,
+input#server-url,
+input#server-token,
+textarea{
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(0,0,0,.25);
+  color: rgba(255,255,255,.92);
+}
+.server-block input:focus,
+input#token:focus,
+input#server-url:focus,
+input#server-token:focus,
+textarea:focus{
+  border-color: rgba(77,163,255,.55);
+  box-shadow: 0 0 0 3px rgba(77,163,255,.12);
+}
+
+/* Buttons */
+button{
+  border: 1px solid rgba(77,163,255,.35);
+  background: linear-gradient(180deg, rgba(77,163,255,.22), rgba(26,115,232,.12));
+  color: rgba(255,255,255,.92);
+  box-shadow: 0 10px 20px rgba(0,0,0,.25);
+}
+button:hover{
+  border-color: rgba(77,163,255,.55);
+  box-shadow: 0 12px 24px rgba(0,0,0,.28), 0 0 0 3px rgba(77,163,255,.12);
+}
+#heuristic-open{
+  background: linear-gradient(180deg, rgba(77,163,255,.40), rgba(26,115,232,.18));
+  border-color: rgba(77,163,255,.60);
+}
+#heuristic-open:disabled{
+  background: rgba(77,163,255,.18);
+  border-color: rgba(77,163,255,.18);
+}
+
+/* Output */
+pre#out{
+  background: rgba(0,0,0,.28);
+  color: rgba(255,255,255,.85);
+  max-height: 260px;
+}
+
+/* Divider */
+hr{
+  border-top: 1px solid rgba(255,255,255,.12);
+}
+
+/* Labels / small text */
+.label, .status, .note, .small, .small-inline, .server-block .status{
+  color: var(--muted);
+}
+
+/* Toasts */
+.toast{
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(0,0,0,.35);
+  color: rgba(255,255,255,.90);
+  box-shadow: 0 10px 24px rgba(0,0,0,.35);
+  backdrop-filter: blur(10px);
+}
+.toast.info{ border-color: rgba(249,171,0,.45); }
+.toast.success{ border-color: rgba(77,163,255,.45); }
+.toast.error{ border-color: rgba(217,48,37,.55); }
+
+/* ===== Popup entrance animation ===== */
+
+body{
+  animation: popupFadeSlide .25s ease-out;
+}
+
+@keyframes popupFadeSlide{
+
+  from{
+    opacity:0;
+    transform: translateY(8px) scale(.98);
+  }
+
+  to{
+    opacity:1;
+    transform: translateY(0) scale(1);
+  }
+
+}
+
+.check-row{
+  animation: rowFade .35s ease;
+}
+
+@keyframes rowFade{
+
+  from{
+    opacity:0;
+    transform: translateY(4px);
+  }
+
+  to{
+    opacity:1;
+    transform: translateY(0);
+  }
+
+}
