@@ -168,7 +168,7 @@ function renderHeuristic(els, r) {
 
   if (heuristicStatus) {
     heuristicStatus.textContent = r.isLikelyPolicyPage
-      ? "This page looks like a Privacy Policy ✅"
+      ? "Evil Eye Detects 🧿"
       : "Not a policy page (heuristic)";
   }
 
