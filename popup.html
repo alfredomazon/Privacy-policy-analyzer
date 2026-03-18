@@ -16,12 +16,7 @@
           <div class="brand-subtitle">Privacy policy analyzer</div>
         </div>
       </div>
-
-      <!-- <label class="toggle" title="Enable or disable analyzer">
-        <input type="checkbox" id="gpt5-toggle" />
-        <span class="slider"></span>
-      </label>
-    </div> -->
+    </div>
 
     <div class="card">
       <div class="switch-row">
@@ -32,7 +27,7 @@
         <div class="status-pill" id="heuristic-status">No analysis yet</div>
       </div>
 
-      <div class="score-line" id="heuristic-score"></div>
+      <div id="heuristic-score" class="status-text"></div>
     </div>
 
     <div class="card">
@@ -86,89 +81,7 @@
         </div>
       </div>
     </details>
-<!-- 
-    <div class="card">
-      <div class="section-title">Analyze pasted text</div>
-
-      <div class="field">
-        <label for="text">Policy text</label>
-        <textarea id="text" placeholder="Paste privacy policy text here..."></textarea>
-      </div>
-
-      <div class="button-row">
-        <button id="analyze" class="primary" type="button">Analyze</button>
-      </div>
-
-      <div style="height: 10px;"></div>
-
-      <div class="small muted" style="margin-bottom: 6px;">Analysis output</div>
-      <pre id="out" class="output">No analysis yet.</pre>
-    </div> -->
-
-    <!-- <details>
-      <summary>
-        <span>Extension settings</span>
-        <span class="summary-caret">Expand</span>
-      </summary>
-      <div class="details-content">
-        <div class="card" style="box-shadow: none; margin-top: 10px;">
-          <div class="section-title">Analyzer token</div>
-
-          <div class="field">
-            <label for="token">Extension token</label>
-            <input
-              type="password"
-              id="token"
-              placeholder="Paste your extension token"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="muted">
-            This token is used when sending extracted policy text to your analyzer server.
-          </div>
-        </div>
-
-        <div class="card" style="box-shadow: none; margin-top: 10px;">
-          <div class="section-title">Server sync</div>
-
-          <div class="field">
-            <label for="server-url">Server URL</label>
-            <input
-              type="text"
-              id="server-url"
-              placeholder="https://your-server.example.com"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="field">
-            <label for="server-token">Admin token</label>
-            <input
-              type="password"
-              id="server-token"
-              placeholder="Optional admin token"
-              autocomplete="off"
-            />
-          </div>
-
-          <div class="switch-row" style="margin-bottom: 8px;">
-            <div class="switch-group">
-              <div class="switch-title">Sync local toggle to server</div>
-              <div class="switch-subtitle">Updates server status when you enable or disable the extension</div>
-            </div>
-
-            <label class="toggle" title="Enable or disable sync">
-              <input type="checkbox" id="sync-checkbox" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div id="server-status" class="muted">Server status will appear here.</div>
-        </div>
-      </div>
-    </details>
-  </div> -->
+  </div>
 
   <div id="toast-container"></div>
 
