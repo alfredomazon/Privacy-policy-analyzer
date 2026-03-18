@@ -1,15 +1,5 @@
 // popup.js
 
-// Storage keys
-const SERVER_URL_KEY = "gpt5ServerUrl";
-const SERVER_TOKEN_KEY = "gpt5ServerToken";
-const SERVER_SYNC_KEY = "gpt5ServerSync";
-const TOKEN_KEY = "gpt5ExtensionToken";
-
-function setStatusText(statusEl, enabled) {
-  statusEl.textContent = enabled ? "Enabled (local setting)" : "Disabled (local setting)";
-}
-
 function showToast(toastContainer, message, type = "info") {
   if (!toastContainer) return;
 
@@ -88,37 +78,6 @@ function getCategoryMessage(key) {
   return messages[key] || "The policy may involve this type of data use.";
 }
 
-function syncToServer({ serverStatusEl, toastContainer }, url, token, enabled) {
-  if (!serverStatusEl) return;
-
-  serverStatusEl.textContent = "Syncing...";
-  showToast(toastContainer, "Syncing to server...", "info");
-
-  fetch(`${url.replace(/\/$/, "")}/status`, {
-    method: "POST",
-    headers: Object.assign(
-      { "Content-Type": "application/json" },
-      token ? { "X-Admin-Token": token } : {}
-    ),
-    body: JSON.stringify({ enabled }),
-  })
-    .then((r) => r.json())
-    .then((j) => {
-      const ok = j && j.ok;
-      serverStatusEl.textContent = ok ? "Server updated" : "Server update failed";
-      showToast(
-        toastContainer,
-        ok ? "Server updated" : "Server update failed",
-        ok ? "success" : "error"
-      );
-    })
-    .catch((err) => {
-      const msg = err?.message ? err.message : String(err);
-      serverStatusEl.textContent = "Sync error: " + msg;
-      showToast(toastContainer, "Sync error: " + msg, "error");
-    });
-}
-
 function renderFindings(findingsEl, findings = []) {
   if (!findingsEl) return;
   findingsEl.innerHTML = "";
@@ -147,7 +106,6 @@ function renderFindings(findingsEl, findings = []) {
     const metaParts = [];
     if (item.confidence) metaParts.push(formatConfidence(item.confidence));
     if (item.severity) metaParts.push(formatSeverity(item.severity));
-
     meta.textContent = metaParts.join(" • ");
 
     const summary = document.createElement("div");
@@ -158,41 +116,38 @@ function renderFindings(findingsEl, findings = []) {
     if (meta.textContent) card.appendChild(meta);
     if (summary.textContent) card.appendChild(summary);
 
-    card.appendChild(title);
-if (meta.textContent) card.appendChild(meta);
-if (summary.textContent) card.appendChild(summary);
+    if (Array.isArray(item.evidence) && item.evidence.length) {
+      const evidenceWrap = document.createElement("div");
+      evidenceWrap.className = "finding-evidence-wrap";
 
-if (Array.isArray(item.evidence) && item.evidence.length) {
-  const evidenceWrap = document.createElement("div");
-  evidenceWrap.className = "finding-evidence-wrap";
+      const evidenceToggle = document.createElement("button");
+      evidenceToggle.type = "button";
+      evidenceToggle.className = "finding-evidence-toggle";
+      evidenceToggle.textContent = `Show evidence (${Math.min(item.evidence.length, 2)})`;
 
-  const evidenceToggle = document.createElement("button");
-  evidenceToggle.type = "button";
-  evidenceToggle.className = "finding-evidence-toggle";
-  evidenceToggle.textContent = `Show evidence (${Math.min(item.evidence.length, 2)})`;
+      const evidenceBox = document.createElement("div");
+      evidenceBox.className = "finding-evidence hidden";
 
-  const evidenceBox = document.createElement("div");
-  evidenceBox.className = "finding-evidence hidden";
+      for (const ev of item.evidence.slice(0, 2)) {
+        const line = document.createElement("div");
+        line.className = "finding-evidence-line";
+        line.textContent = ev;
+        evidenceBox.appendChild(line);
+      }
 
-  for (const ev of item.evidence.slice(0, 2)) {
-    const line = document.createElement("div");
-    line.className = "finding-evidence-line";
-    line.textContent = ev;
-    evidenceBox.appendChild(line);
-  }
+      evidenceToggle.addEventListener("click", () => {
+        const isHidden = evidenceBox.classList.contains("hidden");
+        evidenceBox.classList.toggle("hidden", !isHidden);
+        evidenceToggle.textContent = isHidden
+          ? "Hide evidence"
+          : `Show evidence (${Math.min(item.evidence.length, 2)})`;
+      });
 
-  evidenceToggle.addEventListener("click", () => {
-    const isHidden = evidenceBox.classList.contains("hidden");
-    evidenceBox.classList.toggle("hidden", !isHidden);
-    evidenceToggle.textContent = isHidden
-      ? "Hide evidence"
-      : `Show evidence (${Math.min(item.evidence.length, 2)})`;
-  });
+      evidenceWrap.appendChild(evidenceToggle);
+      evidenceWrap.appendChild(evidenceBox);
+      card.appendChild(evidenceWrap);
+    }
 
-  evidenceWrap.appendChild(evidenceToggle);
-  evidenceWrap.appendChild(evidenceBox);
-  card.appendChild(evidenceWrap);
-}
     findingsEl.appendChild(card);
   }
 }
@@ -272,38 +227,6 @@ function renderChecklist(dataChecklist, dataCollected, dataEvidence, isPolicyPag
   }
 }
 
-function renderPolicySummary(summaryEl, r) {
-  if (!summaryEl) return;
-
-  if (!r) {
-    summaryEl.textContent = "No heuristic result yet. Refresh the page, then click Refresh.";
-    return;
-  }
-
-  if (!r.isLikelyPolicyPage) {
-    if (r.bestPolicyLink) {
-      summaryEl.textContent =
-        "This page does not appear to be the policy itself, but a likely policy link was found.";
-    } else {
-      summaryEl.textContent =
-        "This page does not appear to be a privacy policy or terms page.";
-    }
-    return;
-  }
-
-  const findings = Array.isArray(r.findings) ? r.findings : [];
-  if (!findings.length) {
-    summaryEl.textContent =
-      "A likely policy page was detected, but no major privacy concerns were clearly identified yet.";
-    return;
-  }
-
-  const top = findings[0];
-  summaryEl.textContent =
-    top?.summary ||
-    "A likely policy page was detected and one or more privacy concerns were flagged.";
-}
-
 function renderReasonList(listEl, findings = []) {
   if (!listEl) return;
   listEl.innerHTML = "";
@@ -326,6 +249,9 @@ function renderReasonList(listEl, findings = []) {
 
 function renderHeuristic(els, r) {
   const {
+    finderCard,
+    summaryCard,
+    statusTextEl,
     heuristicStatus,
     heuristicScore,
     heuristicLink,
@@ -336,76 +262,127 @@ function renderHeuristic(els, r) {
     heuristicSummary,
   } = els;
 
+  const findings = Array.isArray(r?.findings) ? r.findings : [];
+  const highCount = findings.filter(
+    (f) => String(f.severity || "").toLowerCase() === "high"
+  ).length;
+  const medCount = findings.filter(
+    (f) => String(f.severity || "").toLowerCase() === "medium"
+  ).length;
+
   if (!r) {
+    if (finderCard) finderCard.style.display = "";
+    if (summaryCard) summaryCard.style.display = "none";
+
+    if (statusTextEl) {
+      statusTextEl.textContent = "No page checked yet.";
+    }
+
     if (heuristicStatus) {
       heuristicStatus.textContent = "No analysis yet";
     }
-    if (heuristicScore) heuristicScore.textContent = "";
+
+    if (heuristicScore) {
+      heuristicScore.className = "status-text status-blue";
+      heuristicScore.textContent = "Refresh the page to check for a policy link.";
+    }
+
     if (heuristicLink) heuristicLink.textContent = "—";
     if (heuristicOpen) heuristicOpen.disabled = true;
+
+    if (heuristicSummary) {
+      heuristicSummary.textContent = "No heuristic result yet.";
+    }
 
     renderReasonList(heuristicReasons, []);
     renderChecklist(dataChecklist, {}, {}, false);
     renderFindings(heuristicFindings, []);
-    renderPolicySummary(heuristicSummary, null);
     return;
   }
 
-  if (heuristicStatus) {
-    heuristicStatus.textContent = r.isLikelyPolicyPage
-      ? "Likely privacy or terms page detected"
-      : "This page does not appear to be a privacy policy";
-  }
-
-  const conf = r.confidence ? ` • ${formatConfidence(r.confidence)}` : "";
-if (heuristicScore) {
-  const findings = Array.isArray(r.findings) ? r.findings : [];
-
-  const highCount = findings.filter(
-    f => String(f.severity || "").toLowerCase() === "high"
-  ).length;
-
-  const medCount = findings.filter(
-    f => String(f.severity || "").toLowerCase() === "medium"
-  ).length;
-
-  // Reset classes
-  heuristicScore.className = "status-text";
-
   if (!r.isLikelyPolicyPage) {
-    heuristicScore.textContent = r.bestPolicyLink
-      ? "A likely policy link was found."
-      : "This page does not appear to be a privacy policy.";
+    if (finderCard) finderCard.style.display = "";
+    if (summaryCard) summaryCard.style.display = "none";
 
-    heuristicScore.classList.add("status-blue");
+    if (statusTextEl) {
+      statusTextEl.textContent = r.bestPolicyLink
+        ? "This page does not look like the privacy policy, but a likely policy page was found."
+        : "This page does not look like the privacy policy.";
+    }
 
-  } else if (highCount > 0) {
-    heuristicScore.textContent = `${highCount} high-impact finding${highCount === 1 ? "" : "s"} detected.`;
-    heuristicScore.classList.add("status-red");
+    if (heuristicStatus) {
+      heuristicStatus.textContent = "Not policy page";
+    }
 
-  } else if (medCount > 0) {
-    heuristicScore.textContent = `${medCount} moderate finding${medCount === 1 ? "" : "s"} detected.`;
-    heuristicScore.classList.add("status-yellow");
+    if (heuristicScore) {
+      heuristicScore.className = "status-text status-blue";
+      heuristicScore.textContent = r.bestPolicyLink
+        ? "A likely policy link was found."
+        : "No likely policy link was found.";
+    }
 
-  } else if (findings.length > 0) {
-    heuristicScore.textContent = `${findings.length} finding${findings.length === 1 ? "" : "s"} detected.`;
-    heuristicScore.classList.add("status-green");
+    if (heuristicLink) {
+      heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
+    }
 
-  } else {
-    heuristicScore.textContent = "No major privacy concerns were clearly detected.";
-    heuristicScore.classList.add("status-green");
+    if (heuristicOpen) {
+      heuristicOpen.disabled = !r.bestPolicyLink;
+      heuristicOpen.onclick = () => {
+        if (r.bestPolicyLink) chrome.tabs.create({ url: r.bestPolicyLink });
+      };
+    }
+
+    renderReasonList(heuristicReasons, []);
+    renderChecklist(dataChecklist, {}, {}, false);
+    renderFindings(heuristicFindings, []);
+    return;
   }
-}
 
-  if (heuristicLink) {
-    heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
+  if (finderCard) finderCard.style.display = "none";
+  if (summaryCard) summaryCard.style.display = "";
+
+  if (heuristicSummary) {
+    if (highCount > 0) {
+      heuristicSummary.textContent =
+        `This policy shows ${highCount} high-impact privacy finding${highCount === 1 ? "" : "s"}. Review the findings below for the biggest concerns.`;
+    } else if (medCount > 0) {
+      heuristicSummary.textContent =
+        `This policy shows ${medCount} moderate privacy finding${medCount === 1 ? "" : "s"}.`;
+    } else if (findings.length > 0) {
+      heuristicSummary.textContent =
+        "This policy was detected and a few lower-impact privacy findings were identified.";
+    } else {
+      heuristicSummary.textContent =
+        "This appears to be the policy page, but no major privacy concerns were clearly detected.";
+    }
   }
 
-  const findings = Array.isArray(r.findings) ? r.findings : [];
+  if (heuristicScore) {
+    heuristicScore.className = "status-text";
+
+    if (highCount > 0) {
+      heuristicScore.classList.add("status-red");
+      heuristicScore.textContent = `${highCount} high-impact finding${highCount === 1 ? "" : "s"} detected`;
+    } else if (medCount > 0) {
+      heuristicScore.classList.add("status-yellow");
+      heuristicScore.textContent = `${medCount} moderate finding${medCount === 1 ? "" : "s"} detected`;
+    } else if (findings.length > 0) {
+      heuristicScore.classList.add("status-green");
+      heuristicScore.textContent = `${findings.length} finding${findings.length === 1 ? "" : "s"} detected`;
+    } else {
+      heuristicScore.classList.add("status-green");
+      heuristicScore.textContent = "No major privacy concerns detected";
+    }
+  }
+
   renderReasonList(heuristicReasons, findings);
-  renderChecklist(dataChecklist, r.dataCollected || {}, r.dataEvidence || {}, !!r.isLikelyPolicyPage);
+  renderChecklist(
+    dataChecklist,
+    r.dataCollected || {},
+    r.dataEvidence || {},
+    true
+  );
   renderFindings(heuristicFindings, findings);
-  renderPolicySummary(heuristicSummary, r);
 
   if (heuristicOpen) {
     heuristicOpen.disabled = !r.bestPolicyLink;
@@ -431,338 +408,63 @@ async function loadHeuristicIntoPopup(els) {
   });
 }
 
-// ===== AUTO ANALYZE helpers (GPT enhanced) =====
-
-async function findPolicyLinksFromActiveTab() {
-  const tab = await getActiveTab();
-  if (!tab?.id) return [];
-
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => {
-      const keywords = ["privacy", "terms", "policy", "legal", "tos", "conditions"];
-      const anchors = Array.from(document.querySelectorAll("a[href]"));
-
-      const urls = anchors
-        .map((a) => {
-          const text = (a.innerText || "").toLowerCase();
-          const href = a.getAttribute("href") || "";
-          const hay = `${text} ${href}`.toLowerCase();
-
-          if (!keywords.some((k) => hay.includes(k))) return null;
-
-          try {
-            return new URL(href, window.location.href).toString();
-          } catch {
-            return null;
-          }
-        })
-        .filter((u) => u && /^https?:\/\//i.test(u));
-
-      return Array.from(new Set(urls)).slice(0, 3);
-    },
-  });
-
-  return result || [];
-}
-
-async function extractTextFromUrl(url) {
-  const res = await fetch(url);
-  const html = await res.text();
-
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("script, style, noscript, svg, img").forEach((e) => e.remove());
-
-  return (doc.body?.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function selectImportantParagraphs(text, limit = 45000) {
-  const keywords = [
-    "collect",
-    "collection",
-    "use",
-    "share",
-    "sharing",
-    "third party",
-    "retain",
-    "retention",
-    "sell",
-    "advertis",
-    "cookie",
-    "tracking",
-    "location",
-    "biometric",
-    "children",
-    "opt out",
-    "delete",
-    "deletion",
-    "access",
-    "rights",
-    "gdpr",
-    "ccpa",
-    "california",
-  ];
-
-  const paras = text
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 30);
-
-  const scored = paras
-    .map((p) => {
-      const lower = p.toLowerCase();
-      let score = 0;
-
-      for (const k of keywords) {
-        if (lower.includes(k)) score += 1;
-      }
-
-      score += Math.min(2, p.length / 800);
-
-      return { p, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  let outText = "";
-
-  for (const { p } of scored) {
-    if (outText.length + p.length + 2 > limit) continue;
-    outText += (outText ? "\n\n" : "") + p;
-    if (outText.length >= limit) break;
-  }
-
-  return outText.length ? outText : text.slice(0, limit);
-}
-
-function formatAnalysisForUser(data) {
-  if (!data) return "No analysis result available.";
-
-  const findings = Array.isArray(data.findings) ? data.findings : [];
-  const summary = data.summary || "";
-
-  if (!findings.length) {
-    return summary || "No major privacy concerns were clearly detected in the selected text.";
-  }
-
-  let text = "";
-
-  if (summary) {
-    text += `Summary\n${summary}\n\n`;
-  } else {
-    text += "Privacy summary\n\n";
-  }
-
-  for (const item of findings.slice(0, 5)) {
-    text += `• ${item.title || "Possible privacy concern"}\n`;
-
-    if (item.summary) {
-      text += `  ${item.summary}\n`;
-    }
-
-    const meta = [];
-    if (item.confidence) meta.push(`Confidence: ${formatConfidence(item.confidence)}`);
-    if (item.severity) meta.push(`Impact: ${formatSeverity(item.severity)}`);
-    if (meta.length) text += `  ${meta.join(" • ")}\n`;
-
-    if (Array.isArray(item.evidence) && item.evidence.length) {
-      text += `  Evidence: ${item.evidence[0]}\n`;
-    }
-
-    text += "\n";
-  }
-
-  return text.trim();
-}
-
 async function init() {
-  const checkbox = document.getElementById("gpt5-toggle");
-  const statusEl = document.getElementById("status");
-
-  const serverUrlInput = document.getElementById("server-url");
-  const serverTokenInput = document.getElementById("server-token");
-  const syncCheckbox = document.getElementById("sync-checkbox");
-  const serverStatusEl = document.getElementById("server-status");
-
   const toastContainer = document.getElementById("toast-container");
+  const autoBtn = document.getElementById("auto-analyze");
+  const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
-  const tokenInput = document.getElementById("token");
-  const textArea = document.getElementById("text");
-  const out = document.getElementById("out");
-  const btn = document.getElementById("analyze");
+  const heuristicStatus = document.getElementById("heuristic-status");
+  const heuristicSummary = document.getElementById("heuristic-summary");
 
   const heuristicEls = {
-    heuristicStatus: document.getElementById("heuristic-status"),
+    finderCard: heuristicStatus?.closest(".card") || null,
+    summaryCard: heuristicSummary?.closest(".card") || null,
+    statusTextEl: document.getElementById("status"),
+
+    heuristicStatus,
     heuristicScore: document.getElementById("heuristic-score"),
     heuristicLink: document.getElementById("heuristic-link"),
     heuristicOpen: document.getElementById("heuristic-open"),
     heuristicReasons: document.getElementById("heuristic-reasons"),
     dataChecklist: document.getElementById("data-checklist"),
     heuristicFindings: document.getElementById("heuristic-findings"),
-    heuristicSummary: document.getElementById("heuristic-summary"),
+    heuristicSummary,
   };
-
-  const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
   let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
 
   if (heuristicRefreshBtn) {
     heuristicRefreshBtn.addEventListener("click", async () => {
       latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
-      showToast(toastContainer, "Heuristic refreshed", "info");
+      showToast(toastContainer, "Policy check refreshed", "info");
     });
   }
 
-  if (checkbox && statusEl) {
-    chrome.runtime.sendMessage({ type: "getStatus" }, (res) => {
-      const enabled = !!(res && res.enabled);
-      checkbox.checked = enabled;
-      setStatusText(statusEl, enabled);
-    });
-  }
-
-  chrome.storage.local.get([SERVER_URL_KEY, SERVER_TOKEN_KEY, SERVER_SYNC_KEY], (res) => {
-    if (serverUrlInput) serverUrlInput.value = res[SERVER_URL_KEY] || "";
-    if (serverTokenInput) serverTokenInput.value = res[SERVER_TOKEN_KEY] || "";
-    if (syncCheckbox) syncCheckbox.checked = !!res[SERVER_SYNC_KEY];
-  });
-
-  if (serverUrlInput) {
-    serverUrlInput.addEventListener("change", () => {
-      chrome.storage.local.set({ [SERVER_URL_KEY]: serverUrlInput.value });
-      showToast(toastContainer, "Server URL saved", "info");
-    });
-  }
-
-  if (serverTokenInput) {
-    serverTokenInput.addEventListener("change", () => {
-      chrome.storage.local.set({ [SERVER_TOKEN_KEY]: serverTokenInput.value });
-      showToast(toastContainer, "Server token saved", "info");
-    });
-  }
-
-  if (syncCheckbox) {
-    syncCheckbox.addEventListener("change", () => {
-      chrome.storage.local.set({ [SERVER_SYNC_KEY]: !!syncCheckbox.checked });
-      showToast(
-        toastContainer,
-        syncCheckbox.checked ? "Sync enabled" : "Sync disabled",
-        "info"
-      );
-    });
-  }
-
-  if (checkbox && statusEl) {
-    checkbox.addEventListener("change", () => {
-      const enabled = checkbox.checked;
-      chrome.runtime.sendMessage({ type: "setStatus", enabled }, () => {
-        setStatusText(statusEl, enabled);
-
-        const syncOn = !!syncCheckbox?.checked;
-        const url = serverUrlInput?.value?.trim();
-        const token = serverTokenInput?.value?.trim();
-
-        if (syncOn && url) {
-          syncToServer({ serverStatusEl, toastContainer }, url, token, enabled);
-        } else {
-          showToast(toastContainer, "Local setting saved", "success");
-        }
-      });
-    });
-  }
-
-  if (tokenInput) {
-    const stored = await chrome.storage.local.get([TOKEN_KEY]);
-    tokenInput.value = stored[TOKEN_KEY] || "";
-
-    tokenInput.addEventListener("change", async () => {
-      await chrome.storage.local.set({ [TOKEN_KEY]: tokenInput.value.trim() });
-      showToast(toastContainer, "Extension token saved", "info");
-    });
-  }
-
-  if (btn && textArea && out) {
-    btn.addEventListener("click", async () => {
-      const text = textArea.value.trim();
-      if (!text) {
-        out.textContent = "Paste some policy text first.";
-        return;
-      }
-
-      out.textContent = "Analyzing...";
-
-      chrome.runtime.sendMessage({ type: "analyzePolicy", text }, (res) => {
-        if (!res) {
-          out.textContent = "No response (background may not be running).";
-          return;
-        }
-
-        if (!res.ok) {
-          out.textContent = `Error: ${res.error}\n\n${JSON.stringify(res.details || {}, null, 2)}`;
-          return;
-        }
-
-        out.textContent = formatAnalysisForUser(res.data);
-      });
-    });
-  }
-
-  const autoBtn = document.getElementById("auto-analyze");
-  if (autoBtn && out) {
+  if (autoBtn) {
+    autoBtn.textContent = "Refresh";
     autoBtn.addEventListener("click", async () => {
-      try {
-        out.textContent = "Preparing enhanced analysis...";
-
-        latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
-
-        let links = [];
-
-        if (latestHeuristic?.bestPolicyLink) {
-          links = [latestHeuristic.bestPolicyLink];
-          out.textContent = "Using heuristic policy link:\n" + links[0] + "\n\nFetching text...";
-        } else {
-          out.textContent = "No heuristic policy link found. Scanning page links...";
-          links = await findPolicyLinksFromActiveTab();
-
-          if (!links.length) {
-            out.textContent = "No privacy/terms links found. Try manual paste.";
-            return;
-          }
-
-          out.textContent = "Found links:\n" + links.join("\n") + "\n\nFetching text...";
-        }
-
-        let combined = "";
-        for (const link of links) {
-          try {
-            const text = await extractTextFromUrl(link);
-            combined += `\n\nSOURCE: ${link}\n\n${text}`;
-          } catch (e) {
-            combined += `\n\nSOURCE: ${link}\n\n[Failed to fetch]`;
-          }
-        }
-
-        const trimmed = selectImportantParagraphs(combined, 45000);
-
-        out.textContent = "Sending extracted text to analyzer...";
-
-        chrome.runtime.sendMessage({ type: "analyzePolicy", text: trimmed }, (res) => {
-          if (!res) {
-            out.textContent = "No response from background.";
-            return;
-          }
-
-          if (!res.ok) {
-            out.textContent = `Error: ${res.error}\n\n${JSON.stringify(res.details || {}, null, 2)}`;
-            return;
-          }
-
-          out.textContent = formatAnalysisForUser(res.data);
-        });
-      } catch (err) {
-        out.textContent = "Auto-analyze failed: " + (err?.message || String(err));
-      }
+      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
+      showToast(toastContainer, "Summary refreshed", "info");
     });
   }
+
+  function initDetailsToggles() {
+    const allDetails = document.querySelectorAll("details");
+
+    allDetails.forEach((d) => {
+      const caret = d.querySelector(".summary-caret");
+      if (!caret) return;
+
+      const update = () => {
+        caret.textContent = d.open ? "Collapse" : "Expand";
+      };
+
+      update();
+      d.addEventListener("toggle", update);
+    });
+  }
+
+  initDetailsToggles();
 }
 
 document.addEventListener("DOMContentLoaded", init);
