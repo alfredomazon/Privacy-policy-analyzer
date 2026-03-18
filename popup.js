@@ -251,8 +251,7 @@ function renderHeuristic(els, r) {
   const {
     finderCard,
     summaryCard,
-    statusTextEl,
-    heuristicStatus,
+    policyFinderStatus,
     heuristicScore,
     heuristicLink,
     heuristicOpen,
@@ -274,12 +273,8 @@ function renderHeuristic(els, r) {
     if (finderCard) finderCard.style.display = "";
     if (summaryCard) summaryCard.style.display = "none";
 
-    if (statusTextEl) {
-      statusTextEl.textContent = "No page checked yet.";
-    }
-
-    if (heuristicStatus) {
-      heuristicStatus.textContent = "No analysis yet";
+    if (policyFinderStatus) {
+      policyFinderStatus.textContent = "No page checked yet.";
     }
 
     if (heuristicScore) {
@@ -304,14 +299,10 @@ function renderHeuristic(els, r) {
     if (finderCard) finderCard.style.display = "";
     if (summaryCard) summaryCard.style.display = "none";
 
-    if (statusTextEl) {
-      statusTextEl.textContent = r.bestPolicyLink
+    if (policyFinderStatus) {
+      policyFinderStatus.textContent = r.bestPolicyLink
         ? "This page does not look like the privacy policy, but a likely policy page was found."
         : "This page does not look like the privacy policy.";
-    }
-
-    if (heuristicStatus) {
-      heuristicStatus.textContent = "Not policy page";
     }
 
     if (heuristicScore) {
@@ -413,22 +404,18 @@ async function init() {
   const autoBtn = document.getElementById("auto-analyze");
   const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
-  const heuristicStatus = document.getElementById("heuristic-status");
-  const heuristicSummary = document.getElementById("heuristic-summary");
-
   const heuristicEls = {
-    finderCard: heuristicStatus?.closest(".card") || null,
-    summaryCard: heuristicSummary?.closest(".card") || null,
-    statusTextEl: document.getElementById("status"),
+    finderCard: document.getElementById("policy-finder-card"),
+    summaryCard: document.getElementById("policy-summary-card"),
+    policyFinderStatus: document.getElementById("policy-finder-status"),
 
-    heuristicStatus,
     heuristicScore: document.getElementById("heuristic-score"),
     heuristicLink: document.getElementById("heuristic-link"),
     heuristicOpen: document.getElementById("heuristic-open"),
     heuristicReasons: document.getElementById("heuristic-reasons"),
     dataChecklist: document.getElementById("data-checklist"),
     heuristicFindings: document.getElementById("heuristic-findings"),
-    heuristicSummary,
+    heuristicSummary: document.getElementById("heuristic-summary"),
   };
 
   let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
