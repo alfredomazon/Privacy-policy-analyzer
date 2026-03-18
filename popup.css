@@ -563,3 +563,81 @@ body{
 .finding-evidence-toggle:active {
   transform: scale(0.96);
 }
+
+/* ===== VISUAL UPGRADE (restores "nice" look) ===== */
+
+/* Make summary feel important */
+.summary-box {
+  background: linear-gradient(180deg, rgba(77,163,255,.12), rgba(26,115,232,.08));
+  border: 1px solid rgba(77,163,255,.35);
+  box-shadow: 0 0 0 1px rgba(77,163,255,.15), 0 8px 20px rgba(0,0,0,.25);
+  font-size: 13px;
+}
+
+/* Status line emphasis */
+.status-text {
+  font-weight: 700;
+  font-size: 13px;
+  margin-top: 6px;
+  letter-spacing: 0.2px;
+}
+
+/* Make analyzer pill pop */
+.status-pill {
+  background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.05));
+  border: 1px solid rgba(255,255,255,.2);
+  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  font-weight: 600;
+}
+
+/* Better section titles */
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255,255,255,.95);
+}
+
+/* Improve card separation */
+.card {
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 32px rgba(0,0,0,.4);
+}
+
+/* Findings feel more "alive" */
+.finding-card {
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.04));
+  border: 1px solid rgba(255,255,255,.18);
+  transition: all 0.18s ease;
+}
+
+.finding-card:hover {
+  border-color: rgba(77,163,255,.4);
+  box-shadow: 0 6px 18px rgba(0,0,0,.25);
+}
+
+/* Evidence box glow */
+.finding-evidence {
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+/* Buttons feel more premium */
+button.primary {
+  box-shadow: 0 0 0 1px rgba(77,163,255,.25), 0 8px 18px rgba(0,0,0,.3);
+}
+
+button.primary:hover {
+  box-shadow: 0 0 0 2px rgba(77,163,255,.4), 0 10px 22px rgba(0,0,0,.35);
+}
+
+/* Subtle glow on important text */
+.status-red,
+.status-yellow,
+.status-green,
+.status-blue {
+  font-weight: 700;
+}
