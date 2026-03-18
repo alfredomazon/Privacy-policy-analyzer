@@ -12,15 +12,80 @@ function setStatusText(statusEl, enabled) {
 
 function showToast(toastContainer, message, type = "info") {
   if (!toastContainer) return;
+
   const el = document.createElement("div");
   el.className = `toast ${type}`;
   el.textContent = message;
   toastContainer.appendChild(el);
+
   requestAnimationFrame(() => el.classList.add("visible"));
+
   setTimeout(() => {
     el.classList.remove("visible");
     setTimeout(() => el.remove(), 220);
   }, 3500);
+}
+
+// ---------- Heuristic UI helpers ----------
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+function formatConfidence(confidence) {
+  const v = String(confidence || "").trim().toLowerCase();
+
+  const map = {
+    low: "Low confidence",
+    medium: "Medium confidence",
+    high: "High confidence",
+    possible: "Possible",
+    likely: "Likely",
+    explicit: "Explicit",
+  };
+
+  return map[v] || confidence || "";
+}
+
+function formatSeverity(severity) {
+  const v = String(severity || "").trim().toLowerCase();
+
+  const map = {
+    low: "Low impact",
+    medium: "Medium impact",
+    high: "High impact",
+  };
+
+  return map[v] || severity || "";
+}
+
+function getCategoryMessage(key) {
+  const messages = {
+    identifiers:
+      "The policy suggests this site may collect identifying information.",
+    device_network:
+      "The policy suggests this site may collect device or network information.",
+    location:
+      "The policy suggests this site may collect location data.",
+    cookies_tracking:
+      "The policy suggests this site may use cookies or similar tools to track activity or analyze usage.",
+    payment_financial:
+      "The policy suggests this site may collect payment or financial information.",
+    contacts_content:
+      "The policy suggests this site may collect contacts, uploads, messages, or other content you provide.",
+    biometric:
+      "The policy suggests this site may collect biometric information.",
+    sensitive:
+      "The policy suggests this site may collect sensitive personal information.",
+    children:
+      "The policy mentions children or minors and may apply special rules to their data.",
+    sharing_third_parties:
+      "The policy suggests your data may be shared with third parties.",
+    retention_rights:
+      "The policy mentions data retention, deletion, access, or privacy rights.",
+  };
+
+  return messages[key] || "The policy may involve this type of data use.";
 }
 
 function syncToServer({ serverStatusEl, toastContainer }, url, token, enabled) {
@@ -41,7 +106,11 @@ function syncToServer({ serverStatusEl, toastContainer }, url, token, enabled) {
     .then((j) => {
       const ok = j && j.ok;
       serverStatusEl.textContent = ok ? "Server updated" : "Server update failed";
-      showToast(toastContainer, ok ? "Server updated" : "Server update failed", ok ? "success" : "error");
+      showToast(
+        toastContainer,
+        ok ? "Server updated" : "Server update failed",
+        ok ? "success" : "error"
+      );
     })
     .catch((err) => {
       const msg = err?.message ? err.message : String(err);
@@ -50,10 +119,182 @@ function syncToServer({ serverStatusEl, toastContainer }, url, token, enabled) {
     });
 }
 
-// ---------- Heuristic UI helpers ----------
-async function getActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab || null;
+function renderFindings(findingsEl, findings = []) {
+  if (!findingsEl) return;
+  findingsEl.innerHTML = "";
+
+  const list = Array.isArray(findings) ? findings.slice(0, 6) : [];
+
+  if (!list.length) {
+    const note = document.createElement("div");
+    note.className = "checklist-note";
+    note.textContent = "No clear privacy findings were available.";
+    findingsEl.appendChild(note);
+    return;
+  }
+
+  for (const item of list) {
+    const card = document.createElement("div");
+    card.className = "finding-card";
+
+    const title = document.createElement("div");
+    title.className = "finding-title";
+    title.textContent = item.title || "Possible privacy concern";
+
+    const meta = document.createElement("div");
+    meta.className = "finding-meta";
+
+    const metaParts = [];
+    if (item.confidence) metaParts.push(formatConfidence(item.confidence));
+    if (item.severity) metaParts.push(formatSeverity(item.severity));
+    if (typeof item.score === "number") metaParts.push(`Score ${item.score}`);
+
+    meta.textContent = metaParts.join(" • ");
+
+    const summary = document.createElement("div");
+    summary.className = "finding-summary";
+    summary.textContent = item.summary || "";
+
+    card.appendChild(title);
+    if (meta.textContent) card.appendChild(meta);
+    if (summary.textContent) card.appendChild(summary);
+
+    if (Array.isArray(item.evidence) && item.evidence.length) {
+      const evidence = document.createElement("div");
+      evidence.className = "finding-evidence";
+      evidence.textContent = "Evidence: " + item.evidence.slice(0, 2).join(" • ");
+      card.appendChild(evidence);
+    }
+
+    findingsEl.appendChild(card);
+  }
+}
+
+function renderChecklist(dataChecklist, dataCollected, dataEvidence, isPolicyPage) {
+  if (!dataChecklist) return;
+  dataChecklist.innerHTML = "";
+
+  const labels = {
+    identifiers: "Identifiers (name/email/phone/IP)",
+    device_network: "Device & network (device ID/logs)",
+    location: "Location data",
+    cookies_tracking: "Cookies & tracking/ads",
+    payment_financial: "Payments & financial",
+    contacts_content: "Contacts & user content",
+    biometric: "Biometric data",
+    sensitive: "Sensitive data (health/ID/etc.)",
+    children: "Children/minors info",
+    sharing_third_parties: "Sharing/third parties",
+    retention_rights: "Retention & user rights",
+  };
+
+  if (!isPolicyPage) {
+    const note = document.createElement("div");
+    note.className = "checklist-note";
+    note.textContent = "Open the policy page to extract detected data types.";
+    dataChecklist.appendChild(note);
+    return;
+  }
+
+  const hasAny = dataCollected && Object.values(dataCollected).some(Boolean);
+
+  if (!hasAny) {
+    const note = document.createElement("div");
+    note.className = "checklist-note";
+    note.textContent = "Policy page detected, but no clear data-type signals were found.";
+    dataChecklist.appendChild(note);
+    return;
+  }
+
+  for (const key of Object.keys(labels)) {
+    const checked = !!dataCollected?.[key];
+
+    const row = document.createElement("div");
+    row.className = "check-row";
+
+    const box = document.createElement("span");
+    box.className = "check-box" + (checked ? " checked" : "");
+    box.textContent = checked ? "✓" : "";
+
+    const text = document.createElement("div");
+    text.className = "check-text";
+
+    const title = document.createElement("div");
+    title.className = "check-title";
+    title.textContent = labels[key];
+    text.appendChild(title);
+
+    if (checked) {
+      const impact = document.createElement("div");
+      impact.className = "check-evidence";
+      impact.textContent = getCategoryMessage(key);
+      text.appendChild(impact);
+    }
+
+    const ev = (dataEvidence?.[key] || []).slice(0, 2);
+    if (checked && ev.length) {
+      const quote = document.createElement("div");
+      quote.className = "check-quote";
+      quote.textContent = "Evidence: " + ev.join(" • ");
+      text.appendChild(quote);
+    }
+
+    row.appendChild(box);
+    row.appendChild(text);
+    dataChecklist.appendChild(row);
+  }
+}
+
+function renderPolicySummary(summaryEl, r) {
+  if (!summaryEl) return;
+
+  if (!r) {
+    summaryEl.textContent = "No heuristic result yet. Refresh the page, then click Refresh.";
+    return;
+  }
+
+  if (!r.isLikelyPolicyPage) {
+    if (r.bestPolicyLink) {
+      summaryEl.textContent =
+        "This page does not appear to be the policy itself, but a likely policy link was found.";
+    } else {
+      summaryEl.textContent =
+        "This page does not appear to be a privacy policy or terms page.";
+    }
+    return;
+  }
+
+  const findings = Array.isArray(r.findings) ? r.findings : [];
+  if (!findings.length) {
+    summaryEl.textContent =
+      "A likely policy page was detected, but no major privacy concerns were clearly identified yet.";
+    return;
+  }
+
+  const top = findings[0];
+  summaryEl.textContent =
+    top?.summary ||
+    "A likely policy page was detected and one or more privacy concerns were flagged.";
+}
+
+function renderReasonList(listEl, findings = []) {
+  if (!listEl) return;
+  listEl.innerHTML = "";
+
+  const list = Array.isArray(findings) ? findings.slice(0, 6) : [];
+
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.textContent = "No major privacy concerns were clearly detected yet.";
+    listEl.appendChild(li);
+    return;
+  }
+
+  for (const item of list) {
+    const li = document.createElement("li");
+    li.textContent = item.title || item.summary || "Possible privacy concern detected.";
+    listEl.appendChild(li);
+  }
 }
 
 function renderHeuristic(els, r) {
@@ -64,123 +305,80 @@ function renderHeuristic(els, r) {
     heuristicOpen,
     heuristicReasons,
     dataChecklist,
+    heuristicFindings,
+    heuristicSummary,
   } = els;
 
-  const setReasons = (items) => {
-    if (!heuristicReasons) return;
-    heuristicReasons.innerHTML = "";
-
-    const list = Array.isArray(items) ? items : [];
-    const take = list.slice(0, 6);
-
-    if (take.length === 0) {
-      const li = document.createElement("li");
-      li.textContent = "No strong signals found yet.";
-      heuristicReasons.appendChild(li);
-      return;
-    }
-
-    for (const txt of take) {
-      const li = document.createElement("li");
-      li.textContent = txt;
-      heuristicReasons.appendChild(li);
-    }
-  };
-
-  const renderChecklist = (dataCollected, dataEvidence, isPolicyPage) => {
-    if (!dataChecklist) return;
-    dataChecklist.innerHTML = "";
-
-    const labels = {
-      identifiers: "Identifiers (name/email/phone/IP)",
-      device_network: "Device & network (device ID/logs)",
-      location: "Location data",
-      cookies_tracking: "Cookies & tracking/ads",
-      payment_financial: "Payments & financial",
-      contacts_content: "Contacts & user content",
-      biometric: "Biometric data",
-      sensitive: "Sensitive data (health/ID/etc.)",
-      children: "Children/minors info",
-      sharing_third_parties: "Sharing/third parties",
-      retention_rights: "Retention & user rights",
-    };
-
-    // Not on policy page yet
-    if (!isPolicyPage) {
-      const note = document.createElement("div");
-      note.className = "checklist-note";
-      note.textContent = "Open the policy page to extract detected data types.";
-      dataChecklist.appendChild(note);
-      return;
-    }
-
-    const hasAny = dataCollected && Object.values(dataCollected).some(Boolean);
-    if (!hasAny) {
-      const note = document.createElement("div");
-      note.className = "checklist-note";
-      note.textContent = "Policy page detected, but no clear data-type keywords were found.";
-      dataChecklist.appendChild(note);
-      return;
-    }
-
-    for (const key of Object.keys(labels)) {
-      const checked = !!dataCollected?.[key];
-
-      const row = document.createElement("div");
-      row.className = "check-row";
-
-      const box = document.createElement("span");
-      box.className = "check-box" + (checked ? " checked" : "");
-      box.textContent = checked ? "✓" : "";
-
-      const text = document.createElement("div");
-      text.className = "check-text";
-
-      const title = document.createElement("div");
-      title.className = "check-title";
-      title.textContent = labels[key];
-
-      text.appendChild(title);
-
-      const ev = (dataEvidence?.[key] || []).slice(0, 3);
-      if (checked && ev.length) {
-        const e = document.createElement("div");
-        e.className = "check-evidence";
-        e.textContent = "Matched: " + ev.join(", ");
-        text.appendChild(e);
-      }
-
-      row.appendChild(box);
-      row.appendChild(text);
-      dataChecklist.appendChild(row);
-    }
-  };
-
   if (!r) {
-    if (heuristicStatus) heuristicStatus.textContent = "No heuristic result yet. Refresh the page, then click Refresh.";
+    if (heuristicStatus) {
+      heuristicStatus.textContent = "No analysis yet";
+    }
     if (heuristicScore) heuristicScore.textContent = "";
     if (heuristicLink) heuristicLink.textContent = "—";
     if (heuristicOpen) heuristicOpen.disabled = true;
-    setReasons([]);
-    renderChecklist({}, {}, false);
+
+    renderReasonList(heuristicReasons, []);
+    renderChecklist(dataChecklist, {}, {}, false);
+    renderFindings(heuristicFindings, []);
+    renderPolicySummary(heuristicSummary, null);
     return;
   }
 
   if (heuristicStatus) {
     heuristicStatus.textContent = r.isLikelyPolicyPage
-      ? "Evil Eye Detects 🧿"
-      : "Not a policy page (heuristic)";
+      ? "Likely privacy or terms page detected"
+      : "This page does not appear to be a privacy policy";
   }
 
-  const conf = r.confidence ? ` • ${r.confidence} confidence` : "";
-  if (heuristicScore) heuristicScore.textContent = `Score: ${r.score}/10${conf}`;
+  const conf = r.confidence ? ` • ${formatConfidence(r.confidence)}` : "";
+if (heuristicScore) {
+  const findings = Array.isArray(r.findings) ? r.findings : [];
 
-  if (heuristicLink) heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
+  const highCount = findings.filter(
+    f => String(f.severity || "").toLowerCase() === "high"
+  ).length;
 
-  setReasons(r.reasons || []);
+  const medCount = findings.filter(
+    f => String(f.severity || "").toLowerCase() === "medium"
+  ).length;
 
-  // NEW: checklist rendering
-  renderChecklist(r.dataCollected || {}, r.dataEvidence || {}, !!r.isLikelyPolicyPage);
+  // Reset classes
+  heuristicScore.className = "status-text";
+
+  if (!r.isLikelyPolicyPage) {
+    heuristicScore.textContent = r.bestPolicyLink
+      ? "A likely policy link was found."
+      : "This page does not appear to be a privacy policy.";
+
+    heuristicScore.classList.add("status-blue");
+
+  } else if (highCount > 0) {
+    heuristicScore.textContent = `${highCount} high-impact finding${highCount === 1 ? "" : "s"} detected.`;
+    heuristicScore.classList.add("status-red");
+
+  } else if (medCount > 0) {
+    heuristicScore.textContent = `${medCount} moderate finding${medCount === 1 ? "" : "s"} detected.`;
+    heuristicScore.classList.add("status-yellow");
+
+  } else if (findings.length > 0) {
+    heuristicScore.textContent = `${findings.length} finding${findings.length === 1 ? "" : "s"} detected.`;
+    heuristicScore.classList.add("status-green");
+
+  } else {
+    heuristicScore.textContent = "No major privacy concerns were clearly detected.";
+    heuristicScore.classList.add("status-green");
+  }
+}
+
+  if (heuristicLink) {
+    heuristicLink.textContent = r.bestPolicyLink || "No policy link found";
+  }
+
+  const findings = Array.isArray(r.findings) ? r.findings : [];
+  renderReasonList(heuristicReasons, findings);
+  renderChecklist(dataChecklist, r.dataCollected || {}, r.dataEvidence || {}, !!r.isLikelyPolicyPage);
+  renderFindings(heuristicFindings, findings);
+  renderPolicySummary(heuristicSummary, r);
 
   if (heuristicOpen) {
     heuristicOpen.disabled = !r.bestPolicyLink;
@@ -208,7 +406,6 @@ async function loadHeuristicIntoPopup(els) {
 
 // ===== AUTO ANALYZE helpers (GPT enhanced) =====
 
-// Fallback: Find likely policy links from the active tab (DOM scan)
 async function findPolicyLinksFromActiveTab() {
   const tab = await getActiveTab();
   if (!tab?.id) return [];
@@ -220,12 +417,12 @@ async function findPolicyLinksFromActiveTab() {
       const anchors = Array.from(document.querySelectorAll("a[href]"));
 
       const urls = anchors
-        .map(a => {
+        .map((a) => {
           const text = (a.innerText || "").toLowerCase();
           const href = a.getAttribute("href") || "";
           const hay = `${text} ${href}`.toLowerCase();
 
-          if (!keywords.some(k => hay.includes(k))) return null;
+          if (!keywords.some((k) => hay.includes(k))) return null;
 
           try {
             return new URL(href, window.location.href).toString();
@@ -233,53 +430,71 @@ async function findPolicyLinksFromActiveTab() {
             return null;
           }
         })
-        .filter(u => u && /^https?:\/\//i.test(u));
+        .filter((u) => u && /^https?:\/\//i.test(u));
 
       return Array.from(new Set(urls)).slice(0, 3);
-    }
+    },
   });
 
   return result || [];
 }
 
-// Fetch and clean text from a URL
 async function extractTextFromUrl(url) {
   const res = await fetch(url);
   const html = await res.text();
 
   const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("script, style, noscript, svg, img").forEach(e => e.remove());
+  doc.querySelectorAll("script, style, noscript, svg, img").forEach((e) => e.remove());
 
-  return (doc.body?.innerText || "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (doc.body?.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// Select important paragraphs and cap size
 function selectImportantParagraphs(text, limit = 45000) {
   const keywords = [
-    "collect","collection","use","share","sharing","third party","retain","retention",
-    "sell","advertis","cookie","tracking","location","biometric","children",
-    "opt out","delete","deletion","access","rights","gdpr","ccpa","california"
+    "collect",
+    "collection",
+    "use",
+    "share",
+    "sharing",
+    "third party",
+    "retain",
+    "retention",
+    "sell",
+    "advertis",
+    "cookie",
+    "tracking",
+    "location",
+    "biometric",
+    "children",
+    "opt out",
+    "delete",
+    "deletion",
+    "access",
+    "rights",
+    "gdpr",
+    "ccpa",
+    "california",
   ];
 
   const paras = text
     .split(/\n\s*\n/)
-    .map(p => p.trim())
-    .filter(p => p.length > 30);
+    .map((p) => p.trim())
+    .filter((p) => p.length > 30);
 
-  const scored = paras.map(p => {
-    const lower = p.toLowerCase();
-    let score = 0;
+  const scored = paras
+    .map((p) => {
+      const lower = p.toLowerCase();
+      let score = 0;
 
-    for (const k of keywords) {
-      if (lower.includes(k)) score += 1;
-    }
+      for (const k of keywords) {
+        if (lower.includes(k)) score += 1;
+      }
 
-    score += Math.min(2, p.length / 800);
+      score += Math.min(2, p.length / 800);
 
-    return { p, score };
-  }).sort((a, b) => b.score - a.score);
+      return { p, score };
+    })
+    .sort((a, b) => b.score - a.score);
 
   let outText = "";
 
@@ -292,8 +507,47 @@ function selectImportantParagraphs(text, limit = 45000) {
   return outText.length ? outText : text.slice(0, limit);
 }
 
+function formatAnalysisForUser(data) {
+  if (!data) return "No analysis result available.";
+
+  const findings = Array.isArray(data.findings) ? data.findings : [];
+  const summary = data.summary || "";
+
+  if (!findings.length) {
+    return summary || "No major privacy concerns were clearly detected in the selected text.";
+  }
+
+  let text = "";
+
+  if (summary) {
+    text += `Summary\n${summary}\n\n`;
+  } else {
+    text += "Privacy summary\n\n";
+  }
+
+  for (const item of findings.slice(0, 5)) {
+    text += `• ${item.title || "Possible privacy concern"}\n`;
+
+    if (item.summary) {
+      text += `  ${item.summary}\n`;
+    }
+
+    const meta = [];
+    if (item.confidence) meta.push(`Confidence: ${formatConfidence(item.confidence)}`);
+    if (item.severity) meta.push(`Impact: ${formatSeverity(item.severity)}`);
+    if (meta.length) text += `  ${meta.join(" • ")}\n`;
+
+    if (Array.isArray(item.evidence) && item.evidence.length) {
+      text += `  Evidence: ${item.evidence[0]}\n`;
+    }
+
+    text += "\n";
+  }
+
+  return text.trim();
+}
+
 async function init() {
-  // Grab DOM elements AFTER the popup loads
   const checkbox = document.getElementById("gpt5-toggle");
   const statusEl = document.getElementById("status");
 
@@ -309,7 +563,6 @@ async function init() {
   const out = document.getElementById("out");
   const btn = document.getElementById("analyze");
 
-  // Heuristic UI elements (main focus)
   const heuristicEls = {
     heuristicStatus: document.getElementById("heuristic-status"),
     heuristicScore: document.getElementById("heuristic-score"),
@@ -317,10 +570,12 @@ async function init() {
     heuristicOpen: document.getElementById("heuristic-open"),
     heuristicReasons: document.getElementById("heuristic-reasons"),
     dataChecklist: document.getElementById("data-checklist"),
+    heuristicFindings: document.getElementById("heuristic-findings"),
+    heuristicSummary: document.getElementById("heuristic-summary"),
   };
+
   const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
-  // ---- 0) Load heuristic result (MAIN focus) ----
   let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
 
   if (heuristicRefreshBtn) {
@@ -330,7 +585,6 @@ async function init() {
     });
   }
 
-  // ---- 1) Load toggle state from background + local server settings ----
   if (checkbox && statusEl) {
     chrome.runtime.sendMessage({ type: "getStatus" }, (res) => {
       const enabled = !!(res && res.enabled);
@@ -345,7 +599,6 @@ async function init() {
     if (syncCheckbox) syncCheckbox.checked = !!res[SERVER_SYNC_KEY];
   });
 
-  // ---- 2) Save server config changes ----
   if (serverUrlInput) {
     serverUrlInput.addEventListener("change", () => {
       chrome.storage.local.set({ [SERVER_URL_KEY]: serverUrlInput.value });
@@ -363,11 +616,14 @@ async function init() {
   if (syncCheckbox) {
     syncCheckbox.addEventListener("change", () => {
       chrome.storage.local.set({ [SERVER_SYNC_KEY]: !!syncCheckbox.checked });
-      showToast(toastContainer, syncCheckbox.checked ? "Sync enabled" : "Sync disabled", "info");
+      showToast(
+        toastContainer,
+        syncCheckbox.checked ? "Sync enabled" : "Sync disabled",
+        "info"
+      );
     });
   }
 
-  // ---- 3) Toggle change -> save local + optionally sync server ----
   if (checkbox && statusEl) {
     checkbox.addEventListener("change", () => {
       const enabled = checkbox.checked;
@@ -387,7 +643,6 @@ async function init() {
     });
   }
 
-  // ---- 4) Load + save extension token for analyzer ----
   if (tokenInput) {
     const stored = await chrome.storage.local.get([TOKEN_KEY]);
     tokenInput.value = stored[TOKEN_KEY] || "";
@@ -398,7 +653,6 @@ async function init() {
     });
   }
 
-  // ---- 5) Analyze button -> send to background ----
   if (btn && textArea && out) {
     btn.addEventListener("click", async () => {
       const text = textArea.value.trim();
@@ -414,38 +668,39 @@ async function init() {
           out.textContent = "No response (background may not be running).";
           return;
         }
+
         if (!res.ok) {
           out.textContent = `Error: ${res.error}\n\n${JSON.stringify(res.details || {}, null, 2)}`;
           return;
         }
-        out.textContent = JSON.stringify(res.data, null, 2);
+
+        out.textContent = formatAnalysisForUser(res.data);
       });
     });
   }
 
-  // ---- 6) Auto-analyze (Enhanced GPT) ----
   const autoBtn = document.getElementById("auto-analyze");
   if (autoBtn && out) {
     autoBtn.addEventListener("click", async () => {
       try {
         out.textContent = "Preparing enhanced analysis...";
 
-        // Refresh heuristic before using it
         latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
 
         let links = [];
 
-        // Prefer heuristic best link if available
         if (latestHeuristic?.bestPolicyLink) {
           links = [latestHeuristic.bestPolicyLink];
           out.textContent = "Using heuristic policy link:\n" + links[0] + "\n\nFetching text...";
         } else {
           out.textContent = "No heuristic policy link found. Scanning page links...";
           links = await findPolicyLinksFromActiveTab();
+
           if (!links.length) {
             out.textContent = "No privacy/terms links found. Try manual paste.";
             return;
           }
+
           out.textContent = "Found links:\n" + links.join("\n") + "\n\nFetching text...";
         }
 
@@ -468,11 +723,13 @@ async function init() {
             out.textContent = "No response from background.";
             return;
           }
+
           if (!res.ok) {
             out.textContent = `Error: ${res.error}\n\n${JSON.stringify(res.details || {}, null, 2)}`;
             return;
           }
-          out.textContent = JSON.stringify(res.data, null, 2);
+
+          out.textContent = formatAnalysisForUser(res.data);
         });
       } catch (err) {
         out.textContent = "Auto-analyze failed: " + (err?.message || String(err));
@@ -481,5 +738,4 @@ async function init() {
   }
 }
 
-// Run once, after DOM exists
 document.addEventListener("DOMContentLoaded", init);

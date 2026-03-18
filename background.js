@@ -35,40 +35,301 @@ function scoreToLevel(score) {
   return "blue";
 }
 
-// Converts heuristic into a 0..100 score + issuesCount.
-// Option A tweak: if NOT on policy page, but strong link exists -> yellow.
-function computeFromHeuristic(result) {
-  if (!result) return { score: 0, issuesCount: 0 };
+function normalizeConfidence(value) {
+  const v = String(value || "").trim().toLowerCase();
 
-  // Not on a policy page yet:
-  // if we detected a strong privacy link, show yellow (score ~40).
+  if (v === "explicit") return 1.25;
+  if (v === "high") return 1.15;
+  if (v === "likely") return 1.0;
+  if (v === "medium") return 0.9;
+  if (v === "possible") return 0.7;
+  if (v === "low") return 0.55;
+
+  return 0.75;
+}
+
+function normalizeSeverity(value) {
+  const v = String(value || "").trim().toLowerCase();
+
+  if (v === "high") return 1.3;
+  if (v === "medium") return 1.0;
+  if (v === "low") return 0.7;
+
+  return 1.0;
+}
+
+function categoryBaseWeight(category) {
+  switch (String(category || "").toLowerCase()) {
+    case "tracking":
+      return 22;
+    case "sharing":
+      return 20;
+    case "sale":
+      return 28;
+    case "sensitive":
+      return 26;
+    case "biometric":
+      return 30;
+    case "location":
+      return 18;
+    case "financial":
+      return 18;
+    case "children":
+      return 14;
+    case "retention":
+      return 12;
+    case "rights":
+      return 6;
+    case "identifiers":
+      return 8;
+    case "device_network":
+      return 8;
+    default:
+      return 10;
+  }
+}
+
+function titleFromLegacyKey(key) {
+  const map = {
+    identifiers: "This site may collect identifying information",
+    device_network: "This site may collect device or network information",
+    location: "Location data may be collected",
+    cookies_tracking: "This site may track your activity",
+    payment_financial: "Payment or financial data may be collected",
+    contacts_content: "Contacts or user-provided content may be collected",
+    biometric: "Biometric data may be collected",
+    sensitive: "Sensitive information may be collected",
+    children: "The policy mentions children or minors",
+    sharing_third_parties: "Your data may be shared with third parties",
+    retention_rights: "The policy mentions retention or privacy rights",
+  };
+
+  return map[key] || "Possible privacy concern detected";
+}
+
+function summaryFromLegacyKey(key) {
+  const map = {
+    identifiers:
+      "The policy suggests the site may collect identifying information such as your name, email, phone number, or IP address.",
+    device_network:
+      "The policy suggests the site may collect device or network information such as device identifiers, logs, or browser details.",
+    location:
+      "The policy suggests the site may collect your location information.",
+    cookies_tracking:
+      "The policy suggests cookies or similar tools may be used to monitor usage, analytics, or advertising.",
+    payment_financial:
+      "The policy suggests the site may collect payment or financial information.",
+    contacts_content:
+      "The policy suggests the site may collect contacts, messages, uploads, or other content you provide.",
+    biometric:
+      "The policy suggests biometric information may be collected or processed.",
+    sensitive:
+      "The policy suggests the site may collect sensitive personal information.",
+    children:
+      "The policy includes language about children or minors and how their data is handled.",
+    sharing_third_parties:
+      "The policy suggests information may be shared with vendors, service providers, or partners.",
+    retention_rights:
+      "The policy refers to data retention, deletion, access, or related privacy rights.",
+  };
+
+  return map[key] || "The policy may involve this type of data use.";
+}
+
+function categoryFromLegacyKey(key) {
+  const map = {
+    identifiers: "identifiers",
+    device_network: "device_network",
+    location: "location",
+    cookies_tracking: "tracking",
+    payment_financial: "financial",
+    contacts_content: "content",
+    biometric: "biometric",
+    sensitive: "sensitive",
+    children: "children",
+    sharing_third_parties: "sharing",
+    retention_rights: "retention",
+  };
+
+  return map[key] || "general";
+}
+
+function confidenceFromLegacyKey(key) {
+  const map = {
+    identifiers: "possible",
+    device_network: "possible",
+    location: "possible",
+    cookies_tracking: "likely",
+    payment_financial: "possible",
+    contacts_content: "possible",
+    biometric: "explicit",
+    sensitive: "likely",
+    children: "possible",
+    sharing_third_parties: "likely",
+    retention_rights: "possible",
+  };
+
+  return map[key] || "possible";
+}
+
+function severityFromLegacyKey(key) {
+  const map = {
+    identifiers: "low",
+    device_network: "low",
+    location: "medium",
+    cookies_tracking: "high",
+    payment_financial: "medium",
+    contacts_content: "medium",
+    biometric: "high",
+    sensitive: "high",
+    children: "low",
+    sharing_third_parties: "medium",
+    retention_rights: "low",
+  };
+
+  return map[key] || "medium";
+}
+
+function numericScoreFromLegacyKey(key) {
+  const map = {
+    identifiers: 8,
+    device_network: 8,
+    location: 16,
+    cookies_tracking: 24,
+    payment_financial: 16,
+    contacts_content: 14,
+    biometric: 30,
+    sensitive: 26,
+    children: 10,
+    sharing_third_parties: 22,
+    retention_rights: 8,
+  };
+
+  return map[key] || 10;
+}
+
+function deriveFindingsFromLegacyResult(result) {
+  const found = result?.dataCollected || {};
+  const evidence = result?.dataEvidence || {};
+  const findings = [];
+
+  for (const [key, present] of Object.entries(found)) {
+    if (!present) continue;
+
+    findings.push({
+      category: categoryFromLegacyKey(key),
+      title: titleFromLegacyKey(key),
+      summary: summaryFromLegacyKey(key),
+      confidence: confidenceFromLegacyKey(key),
+      severity: severityFromLegacyKey(key),
+      score: numericScoreFromLegacyKey(key),
+      evidence: Array.isArray(evidence[key]) ? evidence[key].slice(0, 3) : [],
+      sourceKey: key,
+    });
+  }
+
+  return findings;
+}
+
+function normalizeHeuristicResult(result) {
+  if (!result) return null;
+
+  const findings =
+    Array.isArray(result.findings) && result.findings.length
+      ? result.findings
+      : deriveFindingsFromLegacyResult(result);
+
+  return {
+    ...result,
+    findings,
+  };
+}
+
+function computeFromHeuristic(result) {
+  if (!result) {
+    return {
+      score: 0,
+      issuesCount: 0,
+      levelHint: "none",
+      summary: "No analysis yet",
+    };
+  }
+
+  // Not on a policy page yet, but maybe a strong link was found.
   if (!result.isLikelyPolicyPage) {
     const bestLinkScore = result.bestLinkScore || 0;
     const hasStrongLink = !!result.bestPolicyLink && bestLinkScore >= 9;
-    return { score: hasStrongLink ? 40 : 0, issuesCount: 0 };
+
+    return {
+      score: hasStrongLink ? 40 : 0,
+      issuesCount: 0,
+      levelHint: hasStrongLink ? "policy-link" : "none",
+      summary: hasStrongLink ? "Policy link detected" : "No policy detected",
+    };
   }
 
-  const found = result.dataCollected || {};
+  const findings = Array.isArray(result.findings) ? result.findings : [];
+  let rawScore = 0;
 
-  const suspiciousCats = [
-    "cookies_tracking",
-    "sharing_third_parties",
-    "sensitive",
-    "biometric",
-    "children",
-  ];
+  for (const finding of findings) {
+    const base =
+      typeof finding.score === "number"
+        ? finding.score
+        : categoryBaseWeight(finding.category);
 
-  const issuesCount = suspiciousCats.reduce((n, k) => n + (found[k] ? 1 : 0), 0);
+    const conf = normalizeConfidence(finding.confidence);
+    const sev = normalizeSeverity(finding.severity);
 
-  let score = issuesCount * 22;
-  if (result.confidence === "High") score += 10;
-  if (result.confidence === "Low") score -= 10;
-  score = Math.max(0, Math.min(100, score));
+    let itemScore = base * conf * sev;
 
-  return { score, issuesCount };
+    if (Array.isArray(finding.evidence) && finding.evidence.length) {
+      itemScore += 2;
+    }
+
+    rawScore += itemScore;
+  }
+
+  // Fallback for older heuristic objects that may have no findings at all.
+  if (!findings.length) {
+    const found = result.dataCollected || {};
+    if (found.cookies_tracking) rawScore += 18;
+    if (found.sharing_third_parties) rawScore += 18;
+    if (found.sensitive) rawScore += 22;
+    if (found.biometric) rawScore += 28;
+    if (found.children) rawScore += 10;
+    if (found.location) rawScore += 12;
+    if (found.payment_financial) rawScore += 12;
+  }
+
+  const pageConfidence = String(
+    result.pageConfidence || result.confidence || ""
+  ).toLowerCase();
+
+  if (pageConfidence === "high") rawScore += 4;
+  if (pageConfidence === "low") rawScore -= 4;
+
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+  const issuesCount =
+    findings.length > 0
+      ? findings.filter((f) => {
+          const sev = String(f.severity || "").toLowerCase();
+          return sev === "high" || sev === "medium";
+        }).length || findings.length
+      : Math.round(rawScore / 18);
+
+  let summary = "Policy detected";
+  if (score >= 70) summary = "High privacy concern";
+  else if (score >= 35) summary = "Potential privacy concerns";
+
+  return {
+    score,
+    issuesCount,
+    levelHint: score >= 70 ? "high-risk" : score >= 35 ? "policy-risk" : "policy",
+    summary,
+  };
 }
 
-async function setToolbar(tabId, { score, issuesCount = 0 }) {
+async function setToolbar(tabId, { score, issuesCount = 0, summary = "" }) {
   const level = scoreToLevel(score);
 
   await chrome.action.setIcon({ tabId, path: ICONS[level] });
@@ -83,15 +344,19 @@ async function setToolbar(tabId, { score, issuesCount = 0 }) {
     color: level === "red" ? "#D93025" : level === "yellow" ? "#F9AB00" : "#1A73E8",
   });
 
-  await chrome.action.setTitle({
-    tabId,
-    title:
-      level === "red"
-        ? `High risk: ${issuesCount} flags — click to review`
-        : level === "yellow"
-        ? `Policy detected — click to review`
-        : `No policy detected yet`,
-  });
+  let title = "No policy detected yet";
+
+  if (level === "yellow") {
+    title = issuesCount
+      ? `${summary || "Potential privacy concerns"}: ${issuesCount} flagged item${issuesCount === 1 ? "" : "s"}`
+      : `${summary || "Policy detected"} — click to review`;
+  }
+
+  if (level === "red") {
+    title = `${summary || "High privacy concern"}: ${issuesCount} flagged item${issuesCount === 1 ? "" : "s"} — click to review`;
+  }
+
+  await chrome.action.setTitle({ tabId, title });
 }
 
 // Show “Scanning…” while page is loading/navigating
@@ -100,10 +365,11 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
     chrome.action.setBadgeText({ tabId, text: "" });
     chrome.action.setTitle({ tabId, title: "Scanning..." });
 
-    // prevents stale popup data while new page loads
+    // Prevent stale popup data while new page loads.
     if (info.url) delete HEURISTIC_BY_TAB[tabId];
   }
 });
+
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete HEURISTIC_BY_TAB[tabId];
@@ -125,14 +391,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ==============================
   if (msg.type === "heuristicResult") {
     const tabId = sender.tab?.id;
-    if (tabId != null) {
-      // Cache full heuristic object for popup rendering
-      HEURISTIC_BY_TAB[tabId] = msg.result;
 
-      // Compute toolbar state from heuristic
-      const { score, issuesCount } = computeFromHeuristic(msg.result);
-      setToolbar(tabId, { score, issuesCount });
+    if (tabId != null) {
+      const normalized = normalizeHeuristicResult(msg.result);
+
+      HEURISTIC_BY_TAB[tabId] = normalized;
+
+      const computed = computeFromHeuristic(normalized);
+      setToolbar(tabId, computed).catch((err) => {
+        console.error("Failed to update toolbar:", err);
+      });
     }
+
     return; // no response needed
   }
 
@@ -146,7 +416,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // ==============================
-  // 1) popup asks: what's toggle state?
+  // 1) Popup asks: what's toggle state?
   // ==============================
   if (msg.type === "getStatus") {
     chrome.storage.local.get([TOGGLE_KEY], (res) => {
@@ -156,7 +426,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // ==============================
-  // 2) popup says: set toggle state
+  // 2) Popup says: set toggle state
   // ==============================
   if (msg.type === "setStatus") {
     chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
@@ -166,14 +436,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // ==============================
-  // 3) popup says: analyze this text (GPT mode)
+  // 3) Popup says: analyze this text (GPT mode)
   // ==============================
   if (msg.type === "analyzePolicy") {
     (async () => {
       try {
         const toggleRes = await chrome.storage.local.get([TOGGLE_KEY]);
         if (!toggleRes[TOGGLE_KEY]) {
-          sendResponse({ ok: false, error: "Analyzer is disabled. Turn it on first." });
+          sendResponse({
+            ok: false,
+            error: "Analyzer is disabled. Turn it on first.",
+          });
           return;
         }
 
@@ -181,7 +454,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const token = stored[TOKEN_KEY];
 
         if (!token) {
-          sendResponse({ ok: false, error: "Missing Extension Token. Paste it in the popup settings." });
+          sendResponse({
+            ok: false,
+            error: "Missing Extension Token. Paste it in the popup settings.",
+          });
           return;
         }
 
@@ -199,7 +475,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (!r.ok) {
           sendResponse({
             ok: false,
-            error: (data && data.error) ? data.error : `HTTP ${r.status}`,
+            error: data?.error || `HTTP ${r.status}`,
             details: data,
           });
           return;
