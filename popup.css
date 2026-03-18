@@ -478,3 +478,88 @@ body{
   color: #60a5fa;
   text-shadow: 0 0 6px rgba(96, 165, 250, 0.3);
 }
+
+.finding-card {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.finding-card:last-child {
+  margin-bottom: 0;
+}
+
+.finding-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.finding-meta {
+  font-size: 11px;
+  color: var(--warn);
+  line-height: 1.3;
+}
+
+.finding-summary {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.finding-evidence-wrap {
+  margin-top: 2px;
+}
+
+.finding-evidence-toggle {
+  padding: 6px 9px;
+  font-size: 11px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.finding-evidence-toggle:hover {
+  border-color: #4a5a77;
+  color: var(--text);
+}
+
+.finding-evidence {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #c8d2e4;
+  line-height: 1.4;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.finding-evidence.hidden {
+  display: none;
+}
+
+.finding-evidence-line {
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.finding-evidence-line:last-child {
+  margin-bottom: 0;
+}
+
+.finding-evidence-toggle {
+  transition: all 0.15s ease;
+}
+
+.finding-evidence-toggle:active {
+  transform: scale(0.96);
+}

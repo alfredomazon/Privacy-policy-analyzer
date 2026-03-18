@@ -587,22 +587,40 @@
   }
 
   function buildAdjustedSummary(rule, negated, permissionLimited, safeContext) {
-    if (!negated && !permissionLimited && !safeContext) return rule.summary;
-
-    if (rule.category === "tracking" && safeContext) {
-      return "The policy mentions tracking-related technology, but the surrounding language appears more limited to login, security, or basic service functionality.";
-    }
-
-    if (permissionLimited) {
-      return "The policy mentions this data use, but it appears limited by user permission, opt-in, or similar controls.";
-    }
-
-    if (negated) {
-      return "The policy mentions this issue, but the surrounding language appears to limit, deny, or narrow it.";
-    }
-
+  if (!negated && !permissionLimited && !safeContext) {
     return rule.summary;
   }
+
+  if (rule.category === "tracking" && safeContext) {
+    return "This policy mentions cookies or tracking tools, but they appear to be used mainly for login, security, or basic site features.";
+  }
+
+  if (permissionLimited) {
+    if (rule.category === "location") {
+      return "This policy mentions location data, but says it may only be collected if you allow it.";
+    }
+
+    return "This policy mentions this data use, but says it may only happen if you choose to allow it.";
+  }
+
+  if (negated) {
+    if (rule.category === "sale") {
+      return "This policy mentions selling or sharing data, but says it may not sell your personal information.";
+    }
+
+    if (rule.category === "tracking") {
+      return "This policy mentions tracking-related language, but says some tracking may not apply.";
+    }
+
+    if (rule.category === "sharing") {
+      return "This policy mentions sharing data, but says some types of sharing may be limited.";
+    }
+
+    return "This policy mentions this issue, but says it may be limited or may not apply in some cases.";
+  }
+
+  return rule.summary;
+}
 
   function evidenceScore(rule, text) {
     const strongHits = countMatches(text, rule.strong || []);

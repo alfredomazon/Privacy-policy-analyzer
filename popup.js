@@ -147,7 +147,6 @@ function renderFindings(findingsEl, findings = []) {
     const metaParts = [];
     if (item.confidence) metaParts.push(formatConfidence(item.confidence));
     if (item.severity) metaParts.push(formatSeverity(item.severity));
-    if (typeof item.score === "number") metaParts.push(`Score ${item.score}`);
 
     meta.textContent = metaParts.join(" • ");
 
@@ -159,13 +158,41 @@ function renderFindings(findingsEl, findings = []) {
     if (meta.textContent) card.appendChild(meta);
     if (summary.textContent) card.appendChild(summary);
 
-    if (Array.isArray(item.evidence) && item.evidence.length) {
-      const evidence = document.createElement("div");
-      evidence.className = "finding-evidence";
-      evidence.textContent = "Evidence: " + item.evidence.slice(0, 2).join(" • ");
-      card.appendChild(evidence);
-    }
+    card.appendChild(title);
+if (meta.textContent) card.appendChild(meta);
+if (summary.textContent) card.appendChild(summary);
 
+if (Array.isArray(item.evidence) && item.evidence.length) {
+  const evidenceWrap = document.createElement("div");
+  evidenceWrap.className = "finding-evidence-wrap";
+
+  const evidenceToggle = document.createElement("button");
+  evidenceToggle.type = "button";
+  evidenceToggle.className = "finding-evidence-toggle";
+  evidenceToggle.textContent = `Show evidence (${Math.min(item.evidence.length, 2)})`;
+
+  const evidenceBox = document.createElement("div");
+  evidenceBox.className = "finding-evidence hidden";
+
+  for (const ev of item.evidence.slice(0, 2)) {
+    const line = document.createElement("div");
+    line.className = "finding-evidence-line";
+    line.textContent = ev;
+    evidenceBox.appendChild(line);
+  }
+
+  evidenceToggle.addEventListener("click", () => {
+    const isHidden = evidenceBox.classList.contains("hidden");
+    evidenceBox.classList.toggle("hidden", !isHidden);
+    evidenceToggle.textContent = isHidden
+      ? "Hide evidence"
+      : `Show evidence (${Math.min(item.evidence.length, 2)})`;
+  });
+
+  evidenceWrap.appendChild(evidenceToggle);
+  evidenceWrap.appendChild(evidenceBox);
+  card.appendChild(evidenceWrap);
+}
     findingsEl.appendChild(card);
   }
 }
