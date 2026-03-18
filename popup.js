@@ -172,8 +172,7 @@ if (Array.isArray(item.evidence) && item.evidence.length) {
   evidenceToggle.textContent = `Show evidence (${Math.min(item.evidence.length, 2)})`;
 
   const evidenceBox = document.createElement("div");
-  evidenceBox.className = "finding-evidence";
-  evidenceBox.style.display = "none";
+  evidenceBox.className = "finding-evidence hidden";
 
   for (const ev of item.evidence.slice(0, 2)) {
     const line = document.createElement("div");
@@ -183,8 +182,8 @@ if (Array.isArray(item.evidence) && item.evidence.length) {
   }
 
   evidenceToggle.addEventListener("click", () => {
-    const isHidden = evidenceBox.style.display === "none";
-    evidenceBox.style.display = isHidden ? "block" : "none";
+    const isHidden = evidenceBox.classList.contains("hidden");
+    evidenceBox.classList.toggle("hidden", !isHidden);
     evidenceToggle.textContent = isHidden
       ? "Hide evidence"
       : `Show evidence (${Math.min(item.evidence.length, 2)})`;
