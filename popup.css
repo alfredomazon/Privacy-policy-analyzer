@@ -54,6 +54,7 @@ body {
   border-radius: 50%;
   object-fit: cover;
   background: #111;
+  flex: 0 0 auto;
 }
 
 .brand-text {
@@ -113,6 +114,22 @@ body {
   font-size: 12px;
 }
 
+/* Unified top result card */
+#policy-result-card {
+  display: flex;
+  flex-direction: column;
+}
+
+#policy-finder-card,
+#policy-summary-card {
+  min-width: 0;
+}
+
+#policy-finder-card[style*="display: none"],
+#policy-summary-card[style*="display: none"] {
+  margin: 0;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -130,6 +147,7 @@ body {
   font-size: 12px;
   margin-top: 6px;
   font-weight: 700;
+  line-height: 1.4;
 }
 
 .status-red {
@@ -160,6 +178,7 @@ body {
   font-size: 13px;
   line-height: 1.45;
   color: var(--text);
+  word-break: break-word;
 }
 
 .link-box {
@@ -168,7 +187,7 @@ body {
   border-radius: 12px;
   padding: 10px;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--muted);
   word-break: break-word;
 }
@@ -250,7 +269,7 @@ ul.clean-list li {
 .checklist-note {
   font-size: 12px;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.45;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -263,6 +282,10 @@ ul.clean-list li {
   align-items: flex-start;
   padding: 10px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.check-row:first-of-type {
+  margin-top: 6px;
 }
 
 .check-row:last-child {
@@ -346,7 +369,7 @@ ul.clean-list li {
 .finding-meta {
   font-size: 11px;
   color: var(--warn);
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 .finding-summary {
@@ -378,7 +401,7 @@ ul.clean-list li {
   margin-top: 8px;
   font-size: 11px;
   color: #c8d2e4;
-  line-height: 1.4;
+  line-height: 1.45;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
