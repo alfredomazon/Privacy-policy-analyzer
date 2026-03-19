@@ -1,46 +1,67 @@
 // content.js
 // Chunk-based privacy-policy heuristic detector with evidence cleanup.
 // Distinguishes policy-page detection from policy severity.
+// Updated to reduce false positives, improve policy-link detection,
+// and mark only meaningful findings as counted risks.
 
 (function () {
   const MAX_TEXT = 140000;
   const MAX_EVIDENCE_PER_ITEM = 3;
   const MAX_SENTENCES = 1200;
 
-  const PAGE_HINTS = [
+  // Strong privacy-policy indicators only.
+  const STRONG_PAGE_HINTS = [
     /\bprivacy policy\b/i,
     /\bprivacy notice\b/i,
-    /\bdata policy\b/i,
-    /\bcookie policy\b/i,
-    /\bterms of service\b/i,
-    /\bterms and conditions\b/i,
     /\bconsumer privacy\b/i,
     /\byour privacy\b/i,
-    /\bhow we collect\b/i,
-    /\bhow we use\b/i,
+    /\bprivacy choices\b/i,
+    /\bdo not sell\b/i,
+    /\bdo not sell or share\b/i,
     /\bpersonal information\b/i,
     /\bpersonal data\b/i,
-    /\bdo not sell\b/i,
+    /\bhow we collect\b/i,
+    /\bhow we use\b/i,
     /\bcalifornia privacy\b/i,
     /\bgdpr\b/i,
     /\bccpa\b/i,
     /\bcpra\b/i,
-    /\bprivacy choices\b/i,
   ];
 
-  const LINK_KEYWORDS = [
-    "privacy",
-    "policy",
-    "terms",
-    "legal",
-    "cookies",
-    "your privacy",
-    "data policy",
-    "consumer privacy",
-    "do not sell",
-    "privacy choices",
-    "ccpa",
-    "gdpr",
+  // Weak support only. These should not strongly imply a privacy page by themselves.
+  const WEAK_PAGE_HINTS = [
+    /\bcookie policy\b/i,
+    /\bcookies\b/i,
+    /\bdata policy\b/i,
+    /\bterms of service\b/i,
+    /\bterms and conditions\b/i,
+    /\blegal\b/i,
+  ];
+
+  const HIGH_SIGNAL_LINK_PATTERNS = [
+    /privacy policy/i,
+    /privacy notice/i,
+    /consumer privacy/i,
+    /your privacy/i,
+    /privacy choices/i,
+    /do not sell/i,
+    /do not sell or share/i,
+  ];
+
+  const MEDIUM_SIGNAL_LINK_PATTERNS = [
+    /cookie policy/i,
+    /cookies/i,
+    /data policy/i,
+    /ccpa/i,
+    /gdpr/i,
+    /cpra/i,
+  ];
+
+  const LOW_SIGNAL_LINK_PATTERNS = [
+    /terms of service/i,
+    /terms and conditions/i,
+    /\blegal\b/i,
+    /\bpolicy\b/i,
   ];
 
   const NEGATION_PATTERNS = [
@@ -100,44 +121,121 @@
 
   const DATA_CATEGORY_RULES = {
     identifiers: [
-      /\bname\b/i, /\bemail\b/i, /\be-mail\b/i, /\bphone\b/i, /\btelephone\b/i,
-      /\baddress\b/i, /\bpostal address\b/i, /\bip address\b/i, /\bidentifier\b/i,
-      /\baccount information\b/i, /\bpersonal information\b/i, /\bpersonal data\b/i,
+      /\bname\b/i,
+      /\bemail\b/i,
+      /\be-mail\b/i,
+      /\bphone\b/i,
+      /\btelephone\b/i,
+      /\baddress\b/i,
+      /\bpostal address\b/i,
+      /\bip address\b/i,
+      /\bidentifier\b/i,
+      /\baccount information\b/i,
+      /\bpersonal information\b/i,
+      /\bpersonal data\b/i,
     ],
     device_network: [
-      /\bdevice id\b/i, /\bdevice identifier\b/i, /\badvertising id\b/i, /\bip address\b/i,
-      /\bbrowser type\b/i, /\boperating system\b/i, /\blog data\b/i, /\bnetwork information\b/i,
-      /\bdiagnostic data\b/i, /\bcrash data\b/i, /\buser agent\b/i,
+      /\bdevice id\b/i,
+      /\bdevice identifier\b/i,
+      /\badvertising id\b/i,
+      /\bip address\b/i,
+      /\bbrowser type\b/i,
+      /\boperating system\b/i,
+      /\blog data\b/i,
+      /\bnetwork information\b/i,
+      /\bdiagnostic data\b/i,
+      /\bcrash data\b/i,
+      /\buser agent\b/i,
     ],
-    location: [/\blocation\b/i, /\bprecise location\b/i, /\bapproximate location\b/i, /\bgeolocation\b/i, /\bgps\b/i],
+    location: [
+      /\blocation\b/i,
+      /\bprecise location\b/i,
+      /\bapproximate location\b/i,
+      /\bgeolocation\b/i,
+      /\bgps\b/i,
+    ],
     cookies_tracking: [
-      /\bcookies?\b/i, /\bpixels?\b/i, /\bbeacons?\b/i, /\bsimilar technologies\b/i,
-      /\btracking technologies\b/i, /\bdevice fingerprint/i, /\bfingerprinting\b/i,
-      /\banalytics\b/i, /\badvertising\b/i,
+      /\bcookies?\b/i,
+      /\bpixels?\b/i,
+      /\bbeacons?\b/i,
+      /\bsimilar technologies\b/i,
+      /\btracking technologies\b/i,
+      /\bdevice fingerprint/i,
+      /\bfingerprinting\b/i,
+      /\banalytics\b/i,
+      /\badvertising\b/i,
     ],
     payment_financial: [
-      /\bpayment\b/i, /\bcredit card\b/i, /\bdebit card\b/i, /\bbilling\b/i,
-      /\bfinancial information\b/i, /\btransaction information\b/i, /\bbank\b/i,
+      /\bpayment\b/i,
+      /\bcredit card\b/i,
+      /\bdebit card\b/i,
+      /\bbilling\b/i,
+      /\bfinancial information\b/i,
+      /\btransaction information\b/i,
+      /\bbank\b/i,
     ],
     contacts_content: [
-      /\bcontacts\b/i, /\bmessages\b/i, /\bphotos\b/i, /\bvideos\b/i,
-      /\bfiles\b/i, /\bcontent you provide\b/i, /\bupload\b/i, /\buser content\b/i,
+      /\bcontacts\b/i,
+      /\bmessages\b/i,
+      /\bphotos\b/i,
+      /\bvideos\b/i,
+      /\bfiles\b/i,
+      /\bcontent you provide\b/i,
+      /\bupload\b/i,
+      /\buser content\b/i,
     ],
-    biometric: [/\bbiometric\b/i, /\bfingerprint\b/i, /\bfaceprint\b/i, /\bface geometry\b/i, /\bvoiceprint\b/i, /\bretina\b/i, /\biris\b/i],
+    biometric: [
+      /\bbiometric\b/i,
+      /\bfingerprint\b/i,
+      /\bfaceprint\b/i,
+      /\bface geometry\b/i,
+      /\bvoiceprint\b/i,
+      /\bretina\b/i,
+      /\biris\b/i,
+    ],
     sensitive: [
-      /\bhealth\b/i, /\bmedical\b/i, /\bsocial security\b/i, /\bgovernment id\b/i,
-      /\bdriver'?s license\b/i, /\bpassport\b/i, /\bracial\b/i, /\bethnic\b/i,
-      /\breligious\b/i, /\bsexual orientation\b/i, /\bprecise geolocation\b/i,
+      /\bhealth\b/i,
+      /\bmedical\b/i,
+      /\bsocial security\b/i,
+      /\bgovernment id\b/i,
+      /\bdriver'?s license\b/i,
+      /\bpassport\b/i,
+      /\bracial\b/i,
+      /\bethnic\b/i,
+      /\breligious\b/i,
+      /\bsexual orientation\b/i,
+      /\bprecise geolocation\b/i,
     ],
-    children: [/\bchildren\b/i, /\bchild\b/i, /\bminor\b/i, /\bunder 13\b/i, /\bunder thirteen\b/i, /\bparental consent\b/i, /\bcoppa\b/i],
+    children: [
+      /\bchildren\b/i,
+      /\bchild\b/i,
+      /\bminor\b/i,
+      /\bunder 13\b/i,
+      /\bunder thirteen\b/i,
+      /\bparental consent\b/i,
+      /\bcoppa\b/i,
+    ],
     sharing_third_parties: [
-      /\bthird part(y|ies)\b/i, /\bservice providers?\b/i, /\bvendors?\b/i,
-      /\bpartners?\b/i, /\baffiliates?\b/i, /\bshare\b/i, /\bdisclose\b/i, /\bsell\b/i,
+      /\bthird part(y|ies)\b/i,
+      /\bservice providers?\b/i,
+      /\bvendors?\b/i,
+      /\bpartners?\b/i,
+      /\baffiliates?\b/i,
+      /\bshare\b/i,
+      /\bdisclose\b/i,
+      /\bsell\b/i,
     ],
     retention_rights: [
-      /\bretain\b/i, /\bretention\b/i, /\bdelete\b/i, /\bdeletion\b/i,
-      /\baccess\b/i, /\bcorrection\b/i, /\bopt out\b/i, /\bdata rights\b/i,
-      /\bprivacy rights\b/i, /\brequest\b/i,
+      /\bretain\b/i,
+      /\bretention\b/i,
+      /\bdelete\b/i,
+      /\bdeletion\b/i,
+      /\baccess\b/i,
+      /\bcorrection\b/i,
+      /\bopt out\b/i,
+      /\bdata rights\b/i,
+      /\bprivacy rights\b/i,
+      /\brequest\b/i,
     ],
   };
 
@@ -163,8 +261,14 @@
         /\bbehavioral advertising\b/i,
       ],
       medium: [
-        /\banalytics\b/i, /\bmeasure engagement\b/i, /\busage information\b/i,
-        /\buser activity\b/i, /\btrack\b/i, /\bcookies?\b/i, /\bpixels?\b/i, /\bbeacons?\b/i,
+        /\banalytics\b/i,
+        /\bmeasure engagement\b/i,
+        /\busage information\b/i,
+        /\buser activity\b/i,
+        /\btrack\b/i,
+        /\bcookies?\b/i,
+        /\bpixels?\b/i,
+        /\bbeacons?\b/i,
       ],
       negations: [
         /\bdo not track\b/i,
@@ -188,8 +292,19 @@
         /\bsell .* personal information\b/i,
         /\bservice providers? and partners?\b/i,
       ],
-      medium: [/\bservice providers?\b/i, /\bvendors?\b/i, /\bpartners?\b/i, /\baffiliates?\b/i, /\bshare\b/i, /\bdisclose\b/i],
-      negations: [/\bdo not share\b/i, /\bwe do not sell\b/i, /\bwe do not disclose except\b/i],
+      medium: [
+        /\bservice providers?\b/i,
+        /\bvendors?\b/i,
+        /\bpartners?\b/i,
+        /\baffiliates?\b/i,
+        /\bshare\b/i,
+        /\bdisclose\b/i,
+      ],
+      negations: [
+        /\bdo not share\b/i,
+        /\bwe do not sell\b/i,
+        /\bwe do not disclose except\b/i,
+      ],
     },
     {
       category: "sale",
@@ -201,11 +316,15 @@
       strong: [
         /\bsell personal information\b/i,
         /\bsale of personal information\b/i,
-        /\bdo not sell or share\b/i,
         /\bshare .* cross-context behavioral advertising\b/i,
       ],
+      // "do not sell or share" is intentionally NOT a strong risk pattern by itself.
       medium: [/\bsell\b/i, /\bsale\b/i],
-      negations: [/\bdo not sell personal information\b/i, /\bwe do not sell\b/i],
+      negations: [
+        /\bdo not sell personal information\b/i,
+        /\bwe do not sell\b/i,
+        /\bdo not sell or share\b/i,
+      ],
     },
     {
       category: "location",
@@ -225,7 +344,12 @@
         "The policy suggests biometric information may be collected or processed.",
       severity: "high",
       baseScore: 30,
-      strong: [/\bbiometric information\b/i, /\bfingerprint\b/i, /\bface geometry\b/i, /\bvoiceprint\b/i],
+      strong: [
+        /\bbiometric information\b/i,
+        /\bfingerprint\b/i,
+        /\bface geometry\b/i,
+        /\bvoiceprint\b/i,
+      ],
       medium: [/\bbiometric\b/i],
       negations: [],
     },
@@ -253,7 +377,12 @@
         "The policy suggests the site may collect payment, transaction, or other financial information.",
       severity: "medium",
       baseScore: 18,
-      strong: [/\bcredit card\b/i, /\bdebit card\b/i, /\bbilling information\b/i, /\bfinancial information\b/i],
+      strong: [
+        /\bcredit card\b/i,
+        /\bdebit card\b/i,
+        /\bbilling information\b/i,
+        /\bfinancial information\b/i,
+      ],
       medium: [/\bpayment\b/i, /\btransaction\b/i, /\bbilling\b/i],
       negations: [],
     },
@@ -263,7 +392,7 @@
       summary:
         "The policy includes language about children, minors, or parental consent.",
       severity: "low",
-      baseScore: 14,
+      baseScore: 10,
       strong: [/\bunder 13\b/i, /\bparental consent\b/i, /\bcoppa\b/i],
       medium: [/\bchildren\b/i, /\bminor\b/i],
       negations: [],
@@ -274,7 +403,7 @@
       summary:
         "The policy refers to retaining data, deleting data, access requests, or other user privacy rights.",
       severity: "low",
-      baseScore: 12,
+      baseScore: 8,
       strong: [
         /\bretain .* as long as necessary\b/i,
         /\brequest deletion\b/i,
@@ -293,14 +422,24 @@
 
   function getVisibleText() {
     const clone = document.documentElement.cloneNode(true);
-    clone.querySelectorAll("script, style, noscript, svg, img, video, audio").forEach((el) => el.remove());
+    clone
+      .querySelectorAll("script, style, noscript, svg, img, video, audio")
+      .forEach((el) => el.remove());
     return norm(clone.innerText || "").slice(0, MAX_TEXT);
   }
 
   function getCandidateTextBlocks() {
     const selectors = [
-      "main", "article", "[role='main']", ".privacy", ".policy", ".terms", ".legal",
-      ".content", ".main-content", ".entry-content", ".page-content",
+      "main",
+      "article",
+      "[role='main']",
+      ".privacy",
+      ".policy",
+      ".legal",
+      ".content",
+      ".main-content",
+      ".entry-content",
+      ".page-content",
     ];
 
     const blocks = [];
@@ -345,7 +484,9 @@
 
   function countMatches(text, rules) {
     let n = 0;
-    for (const r of rules) if (r.test(text)) n += 1;
+    for (const r of rules) {
+      if (r.test(text)) n += 1;
+    }
     return n;
   }
 
@@ -471,7 +612,11 @@
     return shortenEvidence(best);
   }
 
-  function cleanEvidenceForFinding(rule, matchedItems, maxItems = MAX_EVIDENCE_PER_ITEM) {
+  function cleanEvidenceForFinding(
+    rule,
+    matchedItems,
+    maxItems = MAX_EVIDENCE_PER_ITEM
+  ) {
     const sorted = [...matchedItems].sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return a.text.length - b.text.length;
@@ -485,15 +630,29 @@
     let score = 0;
     const combinedTitle = `${titleText} ${urlText}`;
 
-    score += countMatches(text, PAGE_HINTS) * 2;
-    score += countMatches(combinedTitle, PAGE_HINTS) * 3;
+    // Strong privacy-specific indicators.
+    score += countMatches(text, STRONG_PAGE_HINTS) * 2;
+    score += countMatches(combinedTitle, STRONG_PAGE_HINTS) * 3;
 
-    if (/\/privacy|\/privacy-policy|\/terms|\/legal|\/cookies/i.test(urlText)) score += 4;
-    if (/\bprivacy\b/i.test(titleText)) score += 4;
-    if (/\bterms\b/i.test(titleText)) score += 3;
-    if (/\bcookies\b/i.test(titleText)) score += 2;
+    // Weak/legal indicators only lightly help.
+    score += countMatches(text, WEAK_PAGE_HINTS);
+    score += countMatches(combinedTitle, WEAK_PAGE_HINTS);
 
-    if (/personal information|personal data|how we collect|how we use|do not sell/i.test(text)) {
+    // URL/title weighting: privacy-focused routes get the biggest boost.
+    if (/\/privacy-policy|\/privacy\/|\/privacy\b/i.test(urlText)) score += 6;
+    else if (/\/privacy/i.test(urlText)) score += 5;
+    else if (/\/cookies/i.test(urlText)) score += 2;
+    else if (/\/terms|\/legal/i.test(urlText)) score += 1;
+
+    if (/\bprivacy\b/i.test(titleText)) score += 5;
+    else if (/\bcookies\b/i.test(titleText)) score += 2;
+    else if (/\bterms\b/i.test(titleText)) score += 1;
+
+    if (
+      /personal information|personal data|how we collect|how we use|do not sell/i.test(
+        text
+      )
+    ) {
       score += 4;
     }
 
@@ -506,6 +665,31 @@
     return "Low";
   }
 
+  function scoreLinkSignal(haystack, absUrl, inFooterOrNav) {
+    let score = 0;
+
+    for (const p of HIGH_SIGNAL_LINK_PATTERNS) {
+      if (p.test(haystack)) score += 6;
+    }
+
+    for (const p of MEDIUM_SIGNAL_LINK_PATTERNS) {
+      if (p.test(haystack)) score += 3;
+    }
+
+    for (const p of LOW_SIGNAL_LINK_PATTERNS) {
+      if (p.test(haystack)) score += 1;
+    }
+
+    if (/\/privacy-policy|\/privacy\/|\/privacy\b/i.test(absUrl)) score += 6;
+    else if (/\/privacy/i.test(absUrl)) score += 5;
+    else if (/\/cookies/i.test(absUrl)) score += 2;
+    else if (/\/terms|\/legal/i.test(absUrl)) score += 1;
+
+    if (inFooterOrNav) score += 1;
+
+    return score;
+  }
+
   function findBestPolicyLink() {
     const anchors = Array.from(document.querySelectorAll("a[href]"));
     let best = null;
@@ -515,22 +699,25 @@
       const text = norm(a.innerText || a.getAttribute("aria-label") || "");
       const hay = `${text} ${hrefRaw}`.toLowerCase();
 
-      let score = 0;
-
-      for (const kw of LINK_KEYWORDS) {
-        if (hay.includes(kw)) score += 2;
-      }
-
-      if (/privacy policy/i.test(hay)) score += 5;
-      if (/terms of service|terms and conditions/i.test(hay)) score += 4;
-      if (/cookies policy/i.test(hay)) score += 3;
-      if (/do not sell/i.test(hay)) score += 3;
-
-      if (a.closest("footer, .footer, nav")) score += 1;
-
       try {
         const abs = new URL(hrefRaw, window.location.href).toString();
-        if (/\/privacy|\/privacy-policy|\/terms|\/legal|\/cookies/i.test(abs)) score += 4;
+
+        // Ignore obvious junk/navigation links.
+        if (
+          abs.startsWith("javascript:") ||
+          abs.startsWith("mailto:") ||
+          abs.startsWith("tel:")
+        ) {
+          continue;
+        }
+
+        const score = scoreLinkSignal(
+          hay,
+          abs,
+          !!a.closest("footer, .footer, nav")
+        );
+
+        if (score <= 0) continue;
 
         if (!best || score > best.score) {
           best = { url: abs, score, text };
@@ -538,7 +725,9 @@
       } catch {}
     }
 
-    return best ? { bestPolicyLink: best.url, bestLinkScore: best.score } : { bestPolicyLink: "", bestLinkScore: 0 };
+    return best
+      ? { bestPolicyLink: best.url, bestLinkScore: best.score }
+      : { bestPolicyLink: "", bestLinkScore: 0 };
   }
 
   function extractDataCategories(sentences) {
@@ -555,7 +744,9 @@
   }
 
   function determineConfidence(strongHits, mediumHits, negated, adTechHits) {
-    if (negated && strongHits === 0 && mediumHits <= 1 && adTechHits === 0) return "low";
+    if (negated && strongHits === 0 && mediumHits <= 1 && adTechHits === 0) {
+      return "low";
+    }
     if (strongHits >= 2 || adTechHits >= 2) return "explicit";
     if (strongHits >= 1 || mediumHits >= 3 || adTechHits >= 1) return "likely";
     if (mediumHits >= 1) return "possible";
@@ -566,7 +757,11 @@
     const s = text.toLowerCase();
 
     if (rule.category === "tracking") {
-      if (/sign in|signed in|authentication|security|fraud prevention|session cookie/.test(s)) {
+      if (
+        /sign in|signed in|authentication|security|fraud prevention|session cookie/.test(
+          s
+        )
+      ) {
         return confidence === "explicit" ? "medium" : "low";
       }
     }
@@ -587,40 +782,40 @@
   }
 
   function buildAdjustedSummary(rule, negated, permissionLimited, safeContext) {
-  if (!negated && !permissionLimited && !safeContext) {
+    if (!negated && !permissionLimited && !safeContext) {
+      return rule.summary;
+    }
+
+    if (rule.category === "tracking" && safeContext) {
+      return "This policy mentions cookies or tracking tools, but they appear to be used mainly for login, security, or basic site features.";
+    }
+
+    if (permissionLimited) {
+      if (rule.category === "location") {
+        return "This policy mentions location data, but says it may only be collected if you allow it.";
+      }
+
+      return "This policy mentions this data use, but says it may only happen if you choose to allow it.";
+    }
+
+    if (negated) {
+      if (rule.category === "sale") {
+        return "This policy mentions selling or sharing data, but says it may not sell your personal information.";
+      }
+
+      if (rule.category === "tracking") {
+        return "This policy mentions tracking-related language, but says some tracking may not apply.";
+      }
+
+      if (rule.category === "sharing") {
+        return "This policy mentions sharing data, but says some types of sharing may be limited.";
+      }
+
+      return "This policy mentions this issue, but says it may be limited or may not apply in some cases.";
+    }
+
     return rule.summary;
   }
-
-  if (rule.category === "tracking" && safeContext) {
-    return "This policy mentions cookies or tracking tools, but they appear to be used mainly for login, security, or basic site features.";
-  }
-
-  if (permissionLimited) {
-    if (rule.category === "location") {
-      return "This policy mentions location data, but says it may only be collected if you allow it.";
-    }
-
-    return "This policy mentions this data use, but says it may only happen if you choose to allow it.";
-  }
-
-  if (negated) {
-    if (rule.category === "sale") {
-      return "This policy mentions selling or sharing data, but says it may not sell your personal information.";
-    }
-
-    if (rule.category === "tracking") {
-      return "This policy mentions tracking-related language, but says some tracking may not apply.";
-    }
-
-    if (rule.category === "sharing") {
-      return "This policy mentions sharing data, but says some types of sharing may be limited.";
-    }
-
-    return "This policy mentions this issue, but says it may be limited or may not apply in some cases.";
-  }
-
-  return rule.summary;
-}
 
   function evidenceScore(rule, text) {
     const strongHits = countMatches(text, rule.strong || []);
@@ -652,6 +847,25 @@
       safeContext,
       score,
     };
+  }
+
+  function shouldCountAsRisk(finding) {
+    const severity = String(finding?.severity || "").toLowerCase();
+    const confidence = String(finding?.confidence || "").toLowerCase();
+
+    const severityQualifies = severity === "high" || severity === "medium";
+    const confidenceQualifies =
+      confidence === "likely" || confidence === "explicit";
+
+    // These are useful findings, but they should not inflate the main risk count.
+    const excludedCategories = new Set(["retention", "children"]);
+
+    if (!severityQualifies || !confidenceQualifies) return false;
+    if (excludedCategories.has(String(finding?.category || "").toLowerCase())) {
+      return false;
+    }
+
+    return true;
   }
 
   function mergeFindings(rawFindings) {
@@ -689,7 +903,11 @@
 
       matched.sort((a, b) => b.score - a.score);
 
-      const topEvidence = cleanEvidenceForFinding(rule, matched, MAX_EVIDENCE_PER_ITEM);
+      const topEvidence = cleanEvidenceForFinding(
+        rule,
+        matched,
+        MAX_EVIDENCE_PER_ITEM
+      );
       const strongHits = matched.reduce((n, m) => n + m.strongHits, 0);
       const mediumHits = matched.reduce((n, m) => n + m.mediumHits, 0);
       const adTechHits = matched.reduce((n, m) => n + m.adTechHits, 0);
@@ -697,11 +915,20 @@
       const permissionLimited = matched.some((m) => m.permissionLimited);
       const safeContext = matched.some((m) => m.safeContext);
 
-      let confidence = determineConfidence(strongHits, mediumHits, negated, adTechHits);
+      let confidence = determineConfidence(
+        strongHits,
+        mediumHits,
+        negated,
+        adTechHits
+      );
       let severity = rule.severity;
 
       if (topEvidence.length) {
-        severity = maybeLowerSeverityForContext(rule, topEvidence[0], confidence);
+        severity = maybeLowerSeverityForContext(
+          rule,
+          topEvidence[0],
+          confidence
+        );
       }
 
       let score = rule.baseScore;
@@ -719,15 +946,23 @@
 
       score = Math.max(4, score);
 
-      findings.push({
+      const finding = {
         category: rule.category,
         title: rule.title,
-        summary: buildAdjustedSummary(rule, negated, permissionLimited, safeContext),
+        summary: buildAdjustedSummary(
+          rule,
+          negated,
+          permissionLimited,
+          safeContext
+        ),
         confidence,
         severity,
         score,
         evidence: topEvidence,
-      });
+      };
+
+      finding.countAsRisk = shouldCountAsRisk(finding);
+      findings.push(finding);
     }
 
     return mergeFindings(findings);
@@ -748,7 +983,11 @@
 
     const { bestPolicyLink, bestLinkScore } = findBestPolicyLink();
     const { dataCollected, dataEvidence } = extractDataCategories(sentences);
+
+    // Keep extracting categories for any page so later UI can support Option B,
+    // but only produce full privacy findings on likely policy pages.
     const findings = isLikelyPolicyPage ? extractFindings(sentences) : [];
+    const countedRisks = findings.filter((f) => f.countAsRisk);
 
     return {
       isLikelyPolicyPage,
@@ -756,8 +995,9 @@
       confidence,
       bestPolicyLink,
       bestLinkScore,
-      reasons: findings.slice(0, 6).map((f) => f.title),
+      reasons: countedRisks.slice(0, 6).map((f) => f.title),
       findings,
+      countedRiskCount: countedRisks.length,
       dataCollected,
       dataEvidence,
       pageTitle: titleText,
@@ -787,21 +1027,47 @@
 
   const debouncedSend = debounce(sendResult, 900);
 
-  if (document.readyState === "complete" || document.readyState === "interactive") {
+  function runInitialChecks() {
     sendResult();
+    window.setTimeout(debouncedSend, 1200);
+  }
+
+  if (
+    document.readyState === "complete" ||
+    document.readyState === "interactive"
+  ) {
+    runInitialChecks();
   } else {
-    window.addEventListener("DOMContentLoaded", sendResult, { once: true });
+    window.addEventListener("DOMContentLoaded", runInitialChecks, {
+      once: true,
+    });
   }
 
   window.addEventListener("load", debouncedSend, { once: true });
 
+  // Lighter observer approach: only react to meaningful body changes.
   const observer = new MutationObserver(() => {
     debouncedSend();
   });
 
-  observer.observe(document.documentElement, {
+  if (document.body) {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  // Handle SPA-style URL changes.
+  let lastHref = location.href;
+  const urlWatcher = new MutationObserver(() => {
+    if (location.href !== lastHref) {
+      lastHref = location.href;
+      debouncedSend();
+    }
+  });
+
+  urlWatcher.observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
   });
 })();
