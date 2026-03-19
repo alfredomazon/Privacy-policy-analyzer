@@ -75,9 +75,9 @@ function categoryBaseWeight(category) {
     case "financial":
       return 18;
     case "children":
-      return 14;
+      return 10;
     case "retention":
-      return 12;
+      return 8;
     case "rights":
       return 6;
     case "identifiers":
@@ -208,6 +208,23 @@ function numericScoreFromLegacyKey(key) {
   return map[key] || 10;
 }
 
+function shouldCountAsRisk(finding) {
+  const severity = String(finding?.severity || "").toLowerCase();
+  const confidence = String(finding?.confidence || "").toLowerCase();
+  const category = String(finding?.category || "").toLowerCase();
+
+  const severityQualifies = severity === "high" || severity === "medium";
+  const confidenceQualifies =
+    confidence === "likely" || confidence === "explicit";
+
+  const excludedCategories = new Set(["retention", "children"]);
+
+  if (!severityQualifies || !confidenceQualifies) return false;
+  if (excludedCategories.has(category)) return false;
+
+  return true;
+}
+
 function deriveFindingsFromLegacyResult(result) {
   const found = result?.dataCollected || {};
   const evidence = result?.dataEvidence || {};
@@ -216,7 +233,7 @@ function deriveFindingsFromLegacyResult(result) {
   for (const [key, present] of Object.entries(found)) {
     if (!present) continue;
 
-    findings.push({
+    const finding = {
       category: categoryFromLegacyKey(key),
       title: titleFromLegacyKey(key),
       summary: summaryFromLegacyKey(key),
@@ -225,7 +242,10 @@ function deriveFindingsFromLegacyResult(result) {
       score: numericScoreFromLegacyKey(key),
       evidence: Array.isArray(evidence[key]) ? evidence[key].slice(0, 3) : [],
       sourceKey: key,
-    });
+    };
+
+    finding.countAsRisk = shouldCountAsRisk(finding);
+    findings.push(finding);
   }
 
   return findings;
@@ -236,42 +256,49 @@ function normalizeHeuristicResult(result) {
 
   const findings =
     Array.isArray(result.findings) && result.findings.length
-      ? result.findings
+      ? result.findings.map((f) => ({
+          ...f,
+          countAsRisk:
+            typeof f.countAsRisk === "boolean"
+              ? f.countAsRisk
+              : shouldCountAsRisk(f),
+        }))
       : deriveFindingsFromLegacyResult(result);
+
+  const countedRiskCount =
+    typeof result.countedRiskCount === "number"
+      ? result.countedRiskCount
+      : findings.filter((f) => f.countAsRisk).length;
 
   return {
     ...result,
     findings,
+    countedRiskCount,
   };
 }
 
-function computeFromHeuristic(result) {
-  if (!result) {
-    return {
-      score: 0,
-      issuesCount: 0,
-      levelHint: "none",
-      summary: "No analysis yet",
-    };
-  }
+function computeRiskStats(findings = []) {
+  const countedRisks = findings.filter((f) => f.countAsRisk);
+  const highRisks = countedRisks.filter(
+    (f) => String(f.severity || "").toLowerCase() === "high"
+  );
+  const mediumRisks = countedRisks.filter(
+    (f) => String(f.severity || "").toLowerCase() === "medium"
+  );
 
-  // Not on a policy page yet, but maybe a strong link was found.
-  if (!result.isLikelyPolicyPage) {
-    const bestLinkScore = result.bestLinkScore || 0;
-    const hasStrongLink = !!result.bestPolicyLink && bestLinkScore >= 9;
+  return {
+    total: countedRisks.length,
+    high: highRisks.length,
+    medium: mediumRisks.length,
+  };
+}
 
-    return {
-      score: hasStrongLink ? 40 : 0,
-      issuesCount: 0,
-      levelHint: hasStrongLink ? "policy-link" : "none",
-      summary: hasStrongLink ? "Policy link detected" : "No policy detected",
-    };
-  }
-
-  const findings = Array.isArray(result.findings) ? result.findings : [];
+function computeMeaningfulRiskScore(findings = []) {
   let rawScore = 0;
 
   for (const finding of findings) {
+    if (!finding.countAsRisk) continue;
+
     const base =
       typeof finding.score === "number"
         ? finding.score
@@ -289,47 +316,68 @@ function computeFromHeuristic(result) {
     rawScore += itemScore;
   }
 
-  // Fallback for older heuristic objects that may have no findings at all.
-  if (!findings.length) {
-    const found = result.dataCollected || {};
-    if (found.cookies_tracking) rawScore += 18;
-    if (found.sharing_third_parties) rawScore += 18;
-    if (found.sensitive) rawScore += 22;
-    if (found.biometric) rawScore += 28;
-    if (found.children) rawScore += 10;
-    if (found.location) rawScore += 12;
-    if (found.payment_financial) rawScore += 12;
+  return rawScore;
+}
+
+function computeFromHeuristic(result) {
+  if (!result) {
+    return {
+      score: 0,
+      issuesCount: 0,
+      levelHint: "none",
+      summary: "No analysis yet",
+    };
   }
+
+  if (!result.isLikelyPolicyPage) {
+    const bestLinkScore = result.bestLinkScore || 0;
+    const hasStrongLink = !!result.bestPolicyLink && bestLinkScore >= 10;
+
+    return {
+      score: 0,
+      issuesCount: 0,
+      levelHint: hasStrongLink ? "policy-link" : "none",
+      summary: hasStrongLink
+        ? "Likely policy link found"
+        : "No policy detected",
+    };
+  }
+
+  const findings = Array.isArray(result.findings) ? result.findings : [];
+  const riskStats = computeRiskStats(findings);
+
+  let rawScore = computeMeaningfulRiskScore(findings);
 
   const pageConfidence = String(
     result.pageConfidence || result.confidence || ""
   ).toLowerCase();
 
-  if (pageConfidence === "high") rawScore += 4;
-  if (pageConfidence === "low") rawScore -= 4;
+  if (riskStats.total > 0) {
+    if (pageConfidence === "high") rawScore += 4;
+    if (pageConfidence === "low") rawScore -= 4;
+  }
 
   const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-  const issuesCount =
-    findings.length > 0
-      ? findings.filter((f) => {
-          const sev = String(f.severity || "").toLowerCase();
-          return sev === "high" || sev === "medium";
-        }).length || findings.length
-      : Math.round(rawScore / 18);
 
-  let summary = "Policy detected";
-  if (score >= 70) summary = "High privacy concern";
-  else if (score >= 35) summary = "Potential privacy concerns";
+  let summary = "Privacy policy detected";
+  if (riskStats.high > 0) summary = "High privacy concern";
+  else if (riskStats.medium > 0) summary = "Potential privacy concerns";
+  else if (findings.length > 0) summary = "Low-impact findings only";
 
   return {
     score,
-    issuesCount,
-    levelHint: score >= 70 ? "high-risk" : score >= 35 ? "policy-risk" : "policy",
+    issuesCount: riskStats.total,
+    levelHint:
+      riskStats.high > 0
+        ? "high-risk"
+        : riskStats.medium > 0
+        ? "policy-risk"
+        : "policy",
     summary,
   };
 }
 
-async function setToolbar(tabId, { score, issuesCount = 0, summary = "" }) {
+async function setToolbar(tabId, { score, issuesCount = 0, summary = "", levelHint = "none" }) {
   const level = scoreToLevel(score);
 
   await chrome.action.setIcon({ tabId, path: ICONS[level] });
@@ -341,19 +389,27 @@ async function setToolbar(tabId, { score, issuesCount = 0, summary = "" }) {
 
   await chrome.action.setBadgeBackgroundColor({
     tabId,
-    color: level === "red" ? "#D93025" : level === "yellow" ? "#F9AB00" : "#1A73E8",
+    color:
+      level === "red"
+        ? "#D93025"
+        : level === "yellow"
+        ? "#F9AB00"
+        : "#1A73E8",
   });
 
   let title = "No policy detected yet";
 
-  if (level === "yellow") {
-    title = issuesCount
-      ? `${summary || "Potential privacy concerns"}: ${issuesCount} flagged item${issuesCount === 1 ? "" : "s"}`
-      : `${summary || "Policy detected"} — click to review`;
-  }
-
-  if (level === "red") {
-    title = `${summary || "High privacy concern"}: ${issuesCount} flagged item${issuesCount === 1 ? "" : "s"} — click to review`;
+  if (levelHint === "policy-link") {
+    title = "Likely privacy policy link found — click to review";
+  } else if (levelHint === "policy") {
+    title =
+      issuesCount > 0
+        ? `${summary}: ${issuesCount} risk${issuesCount === 1 ? "" : "s"} flagged`
+        : "Privacy policy detected — no major risks flagged";
+  } else if (levelHint === "policy-risk") {
+    title = `${summary}: ${issuesCount} risk${issuesCount === 1 ? "" : "s"} flagged — click to review`;
+  } else if (levelHint === "high-risk") {
+    title = `${summary}: ${issuesCount} risk${issuesCount === 1 ? "" : "s"} flagged — click to review`;
   }
 
   await chrome.action.setTitle({ tabId, title });
@@ -403,7 +459,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
     }
 
-    return; // no response needed
+    return;
   }
 
   // ==============================
@@ -487,6 +543,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     })();
 
-    return true; // keep channel open
+    return true;
   }
 });
