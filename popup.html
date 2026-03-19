@@ -18,43 +18,47 @@
       </div>
     </div>
 
-    <div id="policy-finder-card" class="card">
-      <div class="section-title">Find policy page</div>
-
-      <div id="policy-finder-status" class="summary-box">
-        This page does not appear to be the privacy policy.
+    <!-- Unified top result card -->
+    <div id="policy-result-card" class="card">
+      <div class="row-between">
+        <div class="section-title" style="margin-bottom: 0;">Page result</div>
+        <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
       </div>
 
       <div style="height: 10px;"></div>
 
-      <div class="small muted" style="margin-bottom: 6px;">Best policy link</div>
+      <!-- Finder mode (kept for popup.js compatibility) -->
+      <div id="policy-finder-card">
+        <div id="policy-finder-status" class="summary-box">
+          This page does not appear to be the privacy policy.
+        </div>
+      </div>
+
+      <!-- Summary mode (kept for popup.js compatibility) -->
+      <div id="policy-summary-card">
+        <div id="heuristic-summary" class="summary-box">
+          No heuristic result yet.
+        </div>
+
+        <div style="height: 10px;"></div>
+
+        <div id="heuristic-score" class="status-text"></div>
+      </div>
+
+      <div style="height: 10px;"></div>
+
+      <div class="small muted" style="margin-bottom: 6px;">Likely policy link</div>
       <div id="heuristic-link" class="link-box">—</div>
 
       <div style="height: 10px;"></div>
 
       <div class="button-row">
         <button id="heuristic-open" type="button" disabled>Open policy page</button>
-        <button id="heuristic-refresh" type="button">Refresh</button>
       </div>
-    </div>
-
-    <div id="policy-summary-card" class="card">
-      <div class="row-between">
-        <div class="section-title" style="margin-bottom: 0;">Page summary</div>
-        <button id="auto-analyze" class="primary" type="button">Refresh</button>
-      </div>
-
-      <div id="heuristic-summary" class="summary-box">
-        No heuristic result yet.
-      </div>
-
-      <div style="height: 10px;"></div>
-
-      <div id="heuristic-score" class="status-text"></div>
     </div>
 
     <div class="card">
-      <div class="section-title">Top findings</div>
+      <div class="section-title">Top counted risks</div>
       <div id="heuristic-findings"></div>
     </div>
 
