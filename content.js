@@ -1,351 +1,1073 @@
-function detectPrivacyHeuristic() {
-  const url = location.href.toLowerCase();
-  const title = (document.title || "").toLowerCase();
-  const h1 = (document.querySelector("h1")?.innerText || "").trim().toLowerCase();
+// content.js
+// Chunk-based privacy-policy heuristic detector with evidence cleanup.
+// Distinguishes policy-page detection from policy severity.
+// Updated to reduce false positives, improve policy-link detection,
+// and mark only meaningful findings as counted risks.
 
-  // --- helpers ---
-  const includesAny = (s, arr) => arr.some(k => s.includes(k));
-  const countHits = (s, arr) => arr.reduce((n, k) => n + (s.includes(k) ? 1 : 0), 0);
+(function () {
+  const MAX_TEXT = 140000;
+  const MAX_EVIDENCE_PER_ITEM = 3;
+  const MAX_SENTENCES = 1200;
 
-  const safeUrl = (href) => {
-    try { return new URL(href, location.href).toString(); } catch { return ""; }
+  // Strong privacy-policy indicators only.
+  const STRONG_PAGE_HINTS = [
+    /\bprivacy policy\b/i,
+    /\bprivacy notice\b/i,
+    /\bconsumer privacy\b/i,
+    /\byour privacy\b/i,
+    /\bprivacy choices\b/i,
+    /\bdo not sell\b/i,
+    /\bdo not sell or share\b/i,
+    /\bpersonal information\b/i,
+    /\bpersonal data\b/i,
+    /\bhow we collect\b/i,
+    /\bhow we use\b/i,
+    /\bcalifornia privacy\b/i,
+    /\bgdpr\b/i,
+    /\bccpa\b/i,
+    /\bcpra\b/i,
+  ];
+
+  // Weak support only. These should not strongly imply a privacy page by themselves.
+  const WEAK_PAGE_HINTS = [
+    /\bcookie policy\b/i,
+    /\bcookies\b/i,
+    /\bdata policy\b/i,
+    /\bterms of service\b/i,
+    /\bterms and conditions\b/i,
+    /\blegal\b/i,
+  ];
+
+  const HIGH_SIGNAL_LINK_PATTERNS = [
+    /privacy policy/i,
+    /privacy notice/i,
+    /consumer privacy/i,
+    /your privacy/i,
+    /privacy choices/i,
+    /do not sell/i,
+    /do not sell or share/i,
+  ];
+
+  const MEDIUM_SIGNAL_LINK_PATTERNS = [
+    /cookie policy/i,
+    /cookies/i,
+    /data policy/i,
+    /ccpa/i,
+    /gdpr/i,
+    /cpra/i,
+  ];
+
+  const LOW_SIGNAL_LINK_PATTERNS = [
+    /terms of service/i,
+    /terms and conditions/i,
+    /\blegal\b/i,
+    /\bpolicy\b/i,
+  ];
+
+  const NEGATION_PATTERNS = [
+    /\bdo not\b/i,
+    /\bdoes not\b/i,
+    /\bdon't\b/i,
+    /\bdoesn't\b/i,
+    /\bnever\b/i,
+    /\bwithout\b/i,
+    /\bexcept\b/i,
+    /\bunless\b/i,
+  ];
+
+  const PERMISSION_PATTERNS = [
+    /\bwith your permission\b/i,
+    /\bwith your consent\b/i,
+    /\bif you enable\b/i,
+    /\bif enabled\b/i,
+    /\bif you allow\b/i,
+    /\bif you choose to\b/i,
+    /\bif you opt in\b/i,
+    /\bonly when you\b/i,
+    /\byou may choose\b/i,
+  ];
+
+  const SAFE_FUNCTION_PATTERNS = [
+    /\bauthentication\b/i,
+    /\bsecurity\b/i,
+    /\bfraud prevention\b/i,
+    /\bfraud detection\b/i,
+    /\blogin\b/i,
+    /\bsigned in\b/i,
+    /\bsign in\b/i,
+    /\bsession cookie\b/i,
+    /\bservice functionality\b/i,
+    /\bprovide the service\b/i,
+    /\bmaintain the service\b/i,
+    /\bdebug(ging)?\b/i,
+    /\bdiagnostics\b/i,
+  ];
+
+  const AD_TECH_PATTERNS = [
+    /\bpersonalized ads?\b/i,
+    /\btargeted ads?\b/i,
+    /\btargeted advertising\b/i,
+    /\badvertising partners?\b/i,
+    /\bad networks?\b/i,
+    /\bcross[- ]site\b/i,
+    /\bcross[- ]context\b/i,
+    /\bbehavioral advertising\b/i,
+    /\bremarketing\b/i,
+    /\bretargeting\b/i,
+    /\bmeasure ad performance\b/i,
+    /\bdeliver ads?\b/i,
+    /\bserve ads?\b/i,
+  ];
+
+  const DATA_CATEGORY_RULES = {
+    identifiers: [
+      /\bname\b/i,
+      /\bemail\b/i,
+      /\be-mail\b/i,
+      /\bphone\b/i,
+      /\btelephone\b/i,
+      /\baddress\b/i,
+      /\bpostal address\b/i,
+      /\bip address\b/i,
+      /\bidentifier\b/i,
+      /\baccount information\b/i,
+      /\bpersonal information\b/i,
+      /\bpersonal data\b/i,
+    ],
+    device_network: [
+      /\bdevice id\b/i,
+      /\bdevice identifier\b/i,
+      /\badvertising id\b/i,
+      /\bip address\b/i,
+      /\bbrowser type\b/i,
+      /\boperating system\b/i,
+      /\blog data\b/i,
+      /\bnetwork information\b/i,
+      /\bdiagnostic data\b/i,
+      /\bcrash data\b/i,
+      /\buser agent\b/i,
+    ],
+    location: [
+      /\blocation\b/i,
+      /\bprecise location\b/i,
+      /\bapproximate location\b/i,
+      /\bgeolocation\b/i,
+      /\bgps\b/i,
+    ],
+    cookies_tracking: [
+      /\bcookies?\b/i,
+      /\bpixels?\b/i,
+      /\bbeacons?\b/i,
+      /\bsimilar technologies\b/i,
+      /\btracking technologies\b/i,
+      /\bdevice fingerprint/i,
+      /\bfingerprinting\b/i,
+      /\banalytics\b/i,
+      /\badvertising\b/i,
+    ],
+    payment_financial: [
+      /\bpayment\b/i,
+      /\bcredit card\b/i,
+      /\bdebit card\b/i,
+      /\bbilling\b/i,
+      /\bfinancial information\b/i,
+      /\btransaction information\b/i,
+      /\bbank\b/i,
+    ],
+    contacts_content: [
+      /\bcontacts\b/i,
+      /\bmessages\b/i,
+      /\bphotos\b/i,
+      /\bvideos\b/i,
+      /\bfiles\b/i,
+      /\bcontent you provide\b/i,
+      /\bupload\b/i,
+      /\buser content\b/i,
+    ],
+    biometric: [
+      /\bbiometric\b/i,
+      /\bfingerprint\b/i,
+      /\bfaceprint\b/i,
+      /\bface geometry\b/i,
+      /\bvoiceprint\b/i,
+      /\bretina\b/i,
+      /\biris\b/i,
+    ],
+    sensitive: [
+      /\bhealth\b/i,
+      /\bmedical\b/i,
+      /\bsocial security\b/i,
+      /\bgovernment id\b/i,
+      /\bdriver'?s license\b/i,
+      /\bpassport\b/i,
+      /\bracial\b/i,
+      /\bethnic\b/i,
+      /\breligious\b/i,
+      /\bsexual orientation\b/i,
+      /\bprecise geolocation\b/i,
+    ],
+    children: [
+      /\bchildren\b/i,
+      /\bchild\b/i,
+      /\bminor\b/i,
+      /\bunder 13\b/i,
+      /\bunder thirteen\b/i,
+      /\bparental consent\b/i,
+      /\bcoppa\b/i,
+    ],
+    sharing_third_parties: [
+      /\bthird part(y|ies)\b/i,
+      /\bservice providers?\b/i,
+      /\bvendors?\b/i,
+      /\bpartners?\b/i,
+      /\baffiliates?\b/i,
+      /\bshare\b/i,
+      /\bdisclose\b/i,
+      /\bsell\b/i,
+    ],
+    retention_rights: [
+      /\bretain\b/i,
+      /\bretention\b/i,
+      /\bdelete\b/i,
+      /\bdeletion\b/i,
+      /\baccess\b/i,
+      /\bcorrection\b/i,
+      /\bopt out\b/i,
+      /\bdata rights\b/i,
+      /\bprivacy rights\b/i,
+      /\brequest\b/i,
+    ],
   };
 
-  // Normalize body text (cap for speed)
-  const bodyText = (document.body?.innerText || "").toLowerCase().slice(0, 160000);
-
-  // --- signals ---
-  const URL_REGEX_STRONG = [
-    /\/privacy([-_]?policy)?(\/|$)/i,
-    /\/privacy[-_]?notice(\/|$)/i,
-    /\/privacy[-_]?statement(\/|$)/i,
-    /privacy[-_]?policy/i
+  const FINDING_RULES = [
+    {
+      category: "tracking",
+      title: "This site may track your activity",
+      summary:
+        "The policy suggests the site may monitor how you use the service for analytics, advertising, or similar tracking purposes.",
+      severity: "high",
+      baseScore: 22,
+      strong: [
+        /\bpersonalized ads?\b/i,
+        /\btargeted ads?\b/i,
+        /\btargeted advertising\b/i,
+        /\badvertising partners?\b/i,
+        /\bcross[- ]site\b/i,
+        /\bcross[- ]context behavioral advertising\b/i,
+        /\btrack your activity\b/i,
+        /\bcookies?, pixels?, (and )?similar technologies\b/i,
+        /\bdevice fingerprint/i,
+        /\bfingerprinting\b/i,
+        /\bbehavioral advertising\b/i,
+      ],
+      medium: [
+        /\banalytics\b/i,
+        /\bmeasure engagement\b/i,
+        /\busage information\b/i,
+        /\buser activity\b/i,
+        /\btrack\b/i,
+        /\bcookies?\b/i,
+        /\bpixels?\b/i,
+        /\bbeacons?\b/i,
+      ],
+      negations: [
+        /\bdo not track\b/i,
+        /\bwe do not track\b/i,
+        /\bnot use .* for advertising\b/i,
+        /\bonly for authentication\b/i,
+        /\bonly to keep you signed in\b/i,
+      ],
+    },
+    {
+      category: "sharing",
+      title: "Your data may be shared with third parties",
+      summary:
+        "The policy suggests information may be shared with vendors, service providers, affiliates, or business partners.",
+      severity: "medium",
+      baseScore: 20,
+      strong: [
+        /\bshare .* with third part/i,
+        /\bshared with .* partners?\b/i,
+        /\bdisclose .* to third part/i,
+        /\bsell .* personal information\b/i,
+        /\bservice providers? and partners?\b/i,
+      ],
+      medium: [
+        /\bservice providers?\b/i,
+        /\bvendors?\b/i,
+        /\bpartners?\b/i,
+        /\baffiliates?\b/i,
+        /\bshare\b/i,
+        /\bdisclose\b/i,
+      ],
+      negations: [
+        /\bdo not share\b/i,
+        /\bwe do not sell\b/i,
+        /\bwe do not disclose except\b/i,
+      ],
+    },
+    {
+      category: "sale",
+      title: "This policy may allow sale or sale-like disclosure of data",
+      summary:
+        "The policy suggests personal information may be sold or disclosed in ways similar to a sale under privacy laws.",
+      severity: "high",
+      baseScore: 28,
+      strong: [
+        /\bsell personal information\b/i,
+        /\bsale of personal information\b/i,
+        /\bshare .* cross-context behavioral advertising\b/i,
+      ],
+      // "do not sell or share" is intentionally NOT a strong risk pattern by itself.
+      medium: [/\bsell\b/i, /\bsale\b/i],
+      negations: [
+        /\bdo not sell personal information\b/i,
+        /\bwe do not sell\b/i,
+        /\bdo not sell or share\b/i,
+      ],
+    },
+    {
+      category: "location",
+      title: "Location data may be collected",
+      summary:
+        "The policy suggests the site may collect your location or geolocation information.",
+      severity: "medium",
+      baseScore: 18,
+      strong: [/\bprecise location\b/i, /\bgps\b/i, /\bgeolocation\b/i],
+      medium: [/\blocation\b/i, /\bapproximate location\b/i],
+      negations: [/\bwe do not collect location\b/i],
+    },
+    {
+      category: "biometric",
+      title: "Biometric data may be collected",
+      summary:
+        "The policy suggests biometric information may be collected or processed.",
+      severity: "high",
+      baseScore: 30,
+      strong: [
+        /\bbiometric information\b/i,
+        /\bfingerprint\b/i,
+        /\bface geometry\b/i,
+        /\bvoiceprint\b/i,
+      ],
+      medium: [/\bbiometric\b/i],
+      negations: [],
+    },
+    {
+      category: "sensitive",
+      title: "Sensitive information may be collected",
+      summary:
+        "The policy suggests the site may collect or process sensitive personal information.",
+      severity: "high",
+      baseScore: 26,
+      strong: [
+        /\bsensitive personal information\b/i,
+        /\bhealth information\b/i,
+        /\bmedical information\b/i,
+        /\bsocial security number\b/i,
+        /\bgovernment-issued id\b/i,
+      ],
+      medium: [/\bhealth\b/i, /\bmedical\b/i, /\bgovernment id\b/i, /\bpassport\b/i],
+      negations: [],
+    },
+    {
+      category: "financial",
+      title: "Payment or financial information may be collected",
+      summary:
+        "The policy suggests the site may collect payment, transaction, or other financial information.",
+      severity: "medium",
+      baseScore: 18,
+      strong: [
+        /\bcredit card\b/i,
+        /\bdebit card\b/i,
+        /\bbilling information\b/i,
+        /\bfinancial information\b/i,
+      ],
+      medium: [/\bpayment\b/i, /\btransaction\b/i, /\bbilling\b/i],
+      negations: [],
+    },
+    {
+      category: "children",
+      title: "The policy mentions children or minors",
+      summary:
+        "The policy includes language about children, minors, or parental consent.",
+      severity: "low",
+      baseScore: 10,
+      strong: [/\bunder 13\b/i, /\bparental consent\b/i, /\bcoppa\b/i],
+      medium: [/\bchildren\b/i, /\bminor\b/i],
+      negations: [],
+    },
+    {
+      category: "retention",
+      title: "The policy mentions retention or privacy rights",
+      summary:
+        "The policy refers to retaining data, deleting data, access requests, or other user privacy rights.",
+      severity: "low",
+      baseScore: 8,
+      strong: [
+        /\bretain .* as long as necessary\b/i,
+        /\brequest deletion\b/i,
+        /\bright to access\b/i,
+        /\bright to delete\b/i,
+        /\bopt out\b/i,
+      ],
+      medium: [/\bretain\b/i, /\bretention\b/i, /\bdelete\b/i, /\baccess\b/i, /\bprivacy rights\b/i],
+      negations: [],
+    },
   ];
 
-  const TITLE_STRONG = ["privacy policy", "privacy notice", "privacy statement"];
-  const H1_STRONG = ["privacy policy", "privacy notice", "privacy statement"];
+  function norm(s) {
+    return String(s || "").replace(/\s+/g, " ").trim();
+  }
 
-  const NOT_PRIVACY_PRIMARY = [
-    "cookie policy",
-    "cookies policy",
-    "terms of service",
-    "terms and conditions",
-    "acceptable use",
-    "eula"
-  ];
+  function getVisibleText() {
+    const clone = document.documentElement.cloneNode(true);
+    clone
+      .querySelectorAll("script, style, noscript, svg, img, video, audio")
+      .forEach((el) => el.remove());
+    return norm(clone.innerText || "").slice(0, MAX_TEXT);
+  }
 
-  const LEGAL_SECTION_PHRASES = [
-    "information we collect",
-    "personal information we collect",
-    "how we use",
-    "how we share",
-    "sharing your information",
-    "your rights",
-    "your choices",
-    "data controller",
-    "legal basis",
-    "retention",
-    "data retention",
-    "contact us",
-    "security",
-    "cookies",
-    "tracking technologies",
-    "do not sell",
-    "opt out",
-    "delete your data",
-    "access your data"
-  ];
+  function getCandidateTextBlocks() {
+    const selectors = [
+      "main",
+      "article",
+      "[role='main']",
+      ".privacy",
+      ".policy",
+      ".legal",
+      ".content",
+      ".main-content",
+      ".entry-content",
+      ".page-content",
+    ];
 
-  const LAW_MARKERS = [
-    "gdpr",
-    "ccpa",
-    "cpra",
-    "california consumer privacy act",
-    "data protection officer",
-    "right to access",
-    "right to delete",
-    "right to opt out"
-  ];
+    const blocks = [];
+    for (const sel of selectors) {
+      document.querySelectorAll(sel).forEach((el) => {
+        const txt = norm(el.innerText || "");
+        if (txt.length > 100) blocks.push(txt);
+      });
+    }
 
-  const LINK_POSITIVE_TEXT = ["privacy policy", "privacy notice", "privacy statement"];
-  const LINK_AMBIGUOUS_TEXT = [
-    "privacy center",
-    "privacy settings",
-    "privacy choices",
-    "your privacy choices",
-    "privacy preferences",
-    "privacy dashboard"
-  ];
-  const LINK_NEGATIVE_TEXT = ["login", "signin", "sign in", "account", "careers", "jobs"];
+    if (!blocks.length) {
+      const bodyText = norm(document.body?.innerText || "");
+      if (bodyText) blocks.push(bodyText);
+    }
 
-  // --- Data categories detector ---
-  function detectDataCategories(text) {
-    const CATS = {
-      identifiers: [
-        "name", "full name", "username", "user name", "email", "e-mail", "phone", "telephone",
-        "address", "mailing address", "ip address", "ip", "account id", "identifier", "unique identifier"
-      ],
-      device_network: [
-        "device", "device id", "advertising id", "idfa", "gaid", "imei", "mac address",
-        "browser", "user agent", "log data", "logs", "diagnostic", "crash", "network", "ip address"
-      ],
-      location: [
-        "location", "precise location", "geolocation", "gps", "latitude", "longitude",
-        "approximate location", "city", "region"
-      ],
-      cookies_tracking: [
-        "cookie", "cookies", "pixel", "beacon", "tracking", "tracking technologies",
-        "analytics", "google analytics", "advertising", "ads", "remarketing", "interest-based"
-      ],
-      payment_financial: [
-        "payment", "credit card", "debit card", "card number", "billing", "transaction",
-        "purchase", "bank", "financial", "invoice"
-      ],
-      contacts_content: [
-        "contacts", "address book", "phonebook", "messages", "communications",
-        "content", "uploads", "files", "photos", "videos", "audio", "documents"
-      ],
-      biometric: [
-        "biometric", "face scan", "facial recognition", "fingerprint", "voiceprint", "iris"
-      ],
-      sensitive: [
-        "social security", "ssn", "government id", "driver's license", "passport",
-        "health", "medical", "diagnosis", "prescription", "insurance", "race", "ethnicity",
-        "religion", "political", "union"
-      ],
-      children: [
-        "children", "child", "under 13", "under the age of 13", "coppa", "minor", "minors"
-      ],
-      sharing_third_parties: [
-        "share", "sharing", "third party", "third-party", "service provider",
-        "partners", "affiliates", "vendors", "advertisers", "sell", "sale"
-      ],
-      retention_rights: [
-        "retain", "retention", "storage", "delete", "deletion", "erasure",
-        "access", "opt out", "opt-out", "data subject", "request", "rights"
-      ]
-    };
+    return blocks.join("\n\n").slice(0, MAX_TEXT);
+  }
 
-    const found = {};
-    const evidence = {};
-    for (const k of Object.keys(CATS)) {
-      found[k] = false;
-      evidence[k] = [];
-      for (const phrase of CATS[k]) {
-        if (text.includes(phrase)) {
-          found[k] = true;
-          if (evidence[k].length < 3 && !evidence[k].includes(phrase)) evidence[k].push(phrase);
+  function splitIntoSentences(text) {
+    return text
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((s) => norm(s))
+      .filter((s) => s.length >= 25)
+      .slice(0, MAX_SENTENCES);
+  }
+
+  function buildChunks(sentences) {
+    const chunks = [];
+
+    for (let i = 0; i < sentences.length; i++) {
+      const s1 = sentences[i];
+      const s2 = sentences[i + 1];
+      const s3 = sentences[i + 2];
+
+      if (s1) chunks.push(s1);
+      if (s1 && s2) chunks.push(`${s1} ${s2}`);
+      if (s1 && s2 && s3) chunks.push(`${s1} ${s2} ${s3}`);
+    }
+
+    return Array.from(new Set(chunks));
+  }
+
+  function countMatches(text, rules) {
+    let n = 0;
+    for (const r of rules) {
+      if (r.test(text)) n += 1;
+    }
+    return n;
+  }
+
+  function hasAny(text, rules) {
+    return rules.some((r) => r.test(text));
+  }
+
+  function getEvidence(units, rules, limit = MAX_EVIDENCE_PER_ITEM) {
+    const hits = [];
+    for (const u of units) {
+      if (hasAny(u, rules)) {
+        hits.push(u);
+        if (hits.length >= limit) break;
+      }
+    }
+    return hits;
+  }
+
+  function sentenceHasNegation(text) {
+    return hasAny(text, NEGATION_PATTERNS);
+  }
+
+  function sentenceHasPermission(text) {
+    return hasAny(text, PERMISSION_PATTERNS);
+  }
+
+  function sentenceHasSafeFunction(text) {
+    return hasAny(text, SAFE_FUNCTION_PATTERNS);
+  }
+
+  function sentenceHasAdTech(text) {
+    return hasAny(text, AD_TECH_PATTERNS);
+  }
+
+  function normalizeForCompare(text) {
+    return String(text || "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[“”"'`]/g, "")
+      .trim();
+  }
+
+  function dedupeEvidence(items, maxItems = MAX_EVIDENCE_PER_ITEM) {
+    const out = [];
+    const seen = new Set();
+
+    for (const item of items) {
+      const raw = item.text || item;
+      const normalized = normalizeForCompare(raw);
+
+      if (!normalized) continue;
+
+      let tooSimilar = false;
+      for (const prior of seen) {
+        if (
+          normalized === prior ||
+          normalized.includes(prior) ||
+          prior.includes(normalized)
+        ) {
+          tooSimilar = true;
+          break;
         }
+      }
+
+      if (tooSimilar) continue;
+
+      seen.add(normalized);
+      out.push(raw);
+
+      if (out.length >= maxItems) break;
+    }
+
+    return out;
+  }
+
+  function shortenEvidence(text, maxLen = 220) {
+    const clean = norm(text);
+    if (clean.length <= maxLen) return clean;
+
+    const slice = clean.slice(0, maxLen);
+    const lastPunct = Math.max(
+      slice.lastIndexOf(". "),
+      slice.lastIndexOf("; "),
+      slice.lastIndexOf(", ")
+    );
+
+    if (lastPunct > 80) {
+      return slice.slice(0, lastPunct + 1).trim();
+    }
+
+    const lastSpace = slice.lastIndexOf(" ");
+    if (lastSpace > 80) {
+      return slice.slice(0, lastSpace).trim() + "…";
+    }
+
+    return slice.trim() + "…";
+  }
+
+  function sentenceStrength(rule, text) {
+    const strongHits = countMatches(text, rule.strong || []);
+    const mediumHits = countMatches(text, rule.medium || []);
+    const adTechHits = sentenceHasAdTech(text) ? 1 : 0;
+    return strongHits * 5 + mediumHits * 2 + adTechHits * 3;
+  }
+
+  function extractBestSnippet(rule, text) {
+    const parts = splitIntoSentences(text);
+
+    if (!parts.length) return shortenEvidence(text);
+
+    const ranked = parts
+      .map((p) => ({
+        text: p,
+        strength: sentenceStrength(rule, p),
+        length: p.length,
+      }))
+      .sort((a, b) => {
+        if (b.strength !== a.strength) return b.strength - a.strength;
+        return a.length - b.length;
+      });
+
+    const best = ranked[0]?.text || text;
+    return shortenEvidence(best);
+  }
+
+  function cleanEvidenceForFinding(
+    rule,
+    matchedItems,
+    maxItems = MAX_EVIDENCE_PER_ITEM
+  ) {
+    const sorted = [...matchedItems].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.text.length - b.text.length;
+    });
+
+    const snippets = sorted.map((m) => extractBestSnippet(rule, m.text));
+    return dedupeEvidence(snippets, maxItems);
+  }
+
+  function scorePolicyPage(text, titleText, urlText) {
+    let score = 0;
+    const combinedTitle = `${titleText} ${urlText}`;
+
+    // Strong privacy-specific indicators.
+    score += countMatches(text, STRONG_PAGE_HINTS) * 2;
+    score += countMatches(combinedTitle, STRONG_PAGE_HINTS) * 3;
+
+    // Weak/legal indicators only lightly help.
+    score += countMatches(text, WEAK_PAGE_HINTS);
+    score += countMatches(combinedTitle, WEAK_PAGE_HINTS);
+
+    // URL/title weighting: privacy-focused routes get the biggest boost.
+    if (/\/privacy-policy|\/privacy\/|\/privacy\b/i.test(urlText)) score += 6;
+    else if (/\/privacy/i.test(urlText)) score += 5;
+    else if (/\/cookies/i.test(urlText)) score += 2;
+    else if (/\/terms|\/legal/i.test(urlText)) score += 1;
+
+    if (/\bprivacy\b/i.test(titleText)) score += 5;
+    else if (/\bcookies\b/i.test(titleText)) score += 2;
+    else if (/\bterms\b/i.test(titleText)) score += 1;
+
+    if (
+      /personal information|personal data|how we collect|how we use|do not sell/i.test(
+        text
+      )
+    ) {
+      score += 4;
+    }
+
+    return score;
+  }
+
+  function classifyPageConfidence(score) {
+    if (score >= 14) return "High";
+    if (score >= 8) return "Medium";
+    return "Low";
+  }
+
+  function scoreLinkSignal(haystack, absUrl, inFooterOrNav) {
+    let score = 0;
+
+    for (const p of HIGH_SIGNAL_LINK_PATTERNS) {
+      if (p.test(haystack)) score += 6;
+    }
+
+    for (const p of MEDIUM_SIGNAL_LINK_PATTERNS) {
+      if (p.test(haystack)) score += 3;
+    }
+
+    for (const p of LOW_SIGNAL_LINK_PATTERNS) {
+      if (p.test(haystack)) score += 1;
+    }
+
+    if (/\/privacy-policy|\/privacy\/|\/privacy\b/i.test(absUrl)) score += 6;
+    else if (/\/privacy/i.test(absUrl)) score += 5;
+    else if (/\/cookies/i.test(absUrl)) score += 2;
+    else if (/\/terms|\/legal/i.test(absUrl)) score += 1;
+
+    if (inFooterOrNav) score += 1;
+
+    return score;
+  }
+
+  function findBestPolicyLink() {
+    const anchors = Array.from(document.querySelectorAll("a[href]"));
+    let best = null;
+
+    for (const a of anchors) {
+      const hrefRaw = a.getAttribute("href") || "";
+      const text = norm(a.innerText || a.getAttribute("aria-label") || "");
+      const hay = `${text} ${hrefRaw}`.toLowerCase();
+
+      try {
+        const abs = new URL(hrefRaw, window.location.href).toString();
+
+        // Ignore obvious junk/navigation links.
+        if (
+          abs.startsWith("javascript:") ||
+          abs.startsWith("mailto:") ||
+          abs.startsWith("tel:")
+        ) {
+          continue;
+        }
+
+        const score = scoreLinkSignal(
+          hay,
+          abs,
+          !!a.closest("footer, .footer, nav")
+        );
+
+        if (score <= 0) continue;
+
+        if (!best || score > best.score) {
+          best = { url: abs, score, text };
+        }
+      } catch {}
+    }
+
+    return best
+      ? { bestPolicyLink: best.url, bestLinkScore: best.score }
+      : { bestPolicyLink: "", bestLinkScore: 0 };
+  }
+
+  function extractDataCategories(sentences) {
+    const dataCollected = {};
+    const dataEvidence = {};
+
+    for (const [key, patterns] of Object.entries(DATA_CATEGORY_RULES)) {
+      const evidence = getEvidence(sentences, patterns);
+      dataCollected[key] = evidence.length > 0;
+      dataEvidence[key] = evidence;
+    }
+
+    return { dataCollected, dataEvidence };
+  }
+
+  function determineConfidence(strongHits, mediumHits, negated, adTechHits) {
+    if (negated && strongHits === 0 && mediumHits <= 1 && adTechHits === 0) {
+      return "low";
+    }
+    if (strongHits >= 2 || adTechHits >= 2) return "explicit";
+    if (strongHits >= 1 || mediumHits >= 3 || adTechHits >= 1) return "likely";
+    if (mediumHits >= 1) return "possible";
+    return "low";
+  }
+
+  function maybeLowerSeverityForContext(rule, text, confidence) {
+    const s = text.toLowerCase();
+
+    if (rule.category === "tracking") {
+      if (
+        /sign in|signed in|authentication|security|fraud prevention|session cookie/.test(
+          s
+        )
+      ) {
+        return confidence === "explicit" ? "medium" : "low";
       }
     }
 
-    const labels = {
-      identifiers: "Identifiers (name/email/phone/IP)",
-      device_network: "Device & network (device ID/logs)",
-      location: "Location data",
-      cookies_tracking: "Cookies & tracking/ads",
-      payment_financial: "Payments & financial",
-      contacts_content: "Contacts & user content",
-      biometric: "Biometric data",
-      sensitive: "Sensitive data (health/ID/etc.)",
-      children: "Children/minors info",
-      sharing_third_parties: "Sharing/third parties",
-      retention_rights: "Retention & user rights"
+    if (rule.category === "location") {
+      if (/with your permission|if you enable|opt in/.test(s)) {
+        return "low";
+      }
+    }
+
+    if (rule.category === "sharing") {
+      if (/service providers?.*perform services|on our behalf|to operate the service/.test(s)) {
+        return "low";
+      }
+    }
+
+    return rule.severity;
+  }
+
+  function buildAdjustedSummary(rule, negated, permissionLimited, safeContext) {
+    if (!negated && !permissionLimited && !safeContext) {
+      return rule.summary;
+    }
+
+    if (rule.category === "tracking" && safeContext) {
+      return "This policy mentions cookies or tracking tools, but they appear to be used mainly for login, security, or basic site features.";
+    }
+
+    if (permissionLimited) {
+      if (rule.category === "location") {
+        return "This policy mentions location data, but says it may only be collected if you allow it.";
+      }
+
+      return "This policy mentions this data use, but says it may only happen if you choose to allow it.";
+    }
+
+    if (negated) {
+      if (rule.category === "sale") {
+        return "This policy mentions selling or sharing data, but says it may not sell your personal information.";
+      }
+
+      if (rule.category === "tracking") {
+        return "This policy mentions tracking-related language, but says some tracking may not apply.";
+      }
+
+      if (rule.category === "sharing") {
+        return "This policy mentions sharing data, but says some types of sharing may be limited.";
+      }
+
+      return "This policy mentions this issue, but says it may be limited or may not apply in some cases.";
+    }
+
+    return rule.summary;
+  }
+
+  function evidenceScore(rule, text) {
+    const strongHits = countMatches(text, rule.strong || []);
+    const mediumHits = countMatches(text, rule.medium || []);
+    const explicitNegation = hasAny(text, rule.negations || []);
+    const genericNegation = sentenceHasNegation(text);
+    const permissionLimited = sentenceHasPermission(text);
+    const safeContext = sentenceHasSafeFunction(text);
+    const adTechHits = sentenceHasAdTech(text) ? 1 : 0;
+
+    let score = 0;
+    score += strongHits * 4;
+    score += mediumHits * 2;
+    score += adTechHits * 3;
+
+    if (explicitNegation) score -= 5;
+    else if (genericNegation && strongHits === 0) score -= 2;
+
+    if (permissionLimited) score -= 2;
+    if (safeContext && rule.category === "tracking") score -= 3;
+    if (safeContext && rule.category === "sharing") score -= 1;
+
+    return {
+      strongHits,
+      mediumHits,
+      adTechHits,
+      negated: explicitNegation || (genericNegation && score <= 2),
+      permissionLimited,
+      safeContext,
+      score,
     };
-
-    const summary = Object.keys(found)
-      .filter(k => found[k])
-      .map(k => labels[k]);
-
-    return { found, evidence, summary };
   }
 
-  // --- scoring (0–10) + reasons ---
-  let score = 0;
-  const reasons = [];
+  function shouldCountAsRisk(finding) {
+    const severity = String(finding?.severity || "").toLowerCase();
+    const confidence = String(finding?.confidence || "").toLowerCase();
 
-  const urlLooksPolicy = URL_REGEX_STRONG.some(rx => rx.test(url));
-  if (urlLooksPolicy) { score += 3; reasons.push("URL matches a privacy policy pattern"); }
+    const severityQualifies = severity === "high" || severity === "medium";
+    const confidenceQualifies =
+      confidence === "likely" || confidence === "explicit";
 
-  const titleLooksPolicy = includesAny(title, TITLE_STRONG);
-  if (titleLooksPolicy) { score += 2; reasons.push("Title looks like a privacy policy"); }
+    // These are useful findings, but they should not inflate the main risk count.
+    const excludedCategories = new Set(["retention", "children"]);
 
-  const h1LooksPolicy = includesAny(h1, H1_STRONG);
-  if (h1LooksPolicy) { score += 2; reasons.push("Main heading looks like a privacy policy"); }
+    if (!severityQualifies || !confidenceQualifies) return false;
+    if (excludedCategories.has(String(finding?.category || "").toLowerCase())) {
+      return false;
+    }
 
-  const looksNotPrivacy = includesAny(title, NOT_PRIVACY_PRIMARY) || includesAny(h1, NOT_PRIVACY_PRIMARY);
-  if (looksNotPrivacy) {
-    score = Math.max(0, score - 2);
-    reasons.push("Looks more like cookies/terms than a privacy policy");
+    return true;
   }
 
-  const sectionHits = countHits(bodyText, LEGAL_SECTION_PHRASES);
-  if (sectionHits >= 2) { score += 1; reasons.push("Contains common privacy-policy sections"); }
-  if (sectionHits >= 5) { score += 1; reasons.push("Contains many privacy-policy sections"); }
+  function mergeFindings(rawFindings) {
+    const byCategory = new Map();
 
-  const lawHits = countHits(bodyText, LAW_MARKERS);
-  if (lawHits >= 1) { score += 1; reasons.push("Mentions privacy rights/laws (GDPR/CCPA/etc.)"); }
-  if (lawHits >= 3) { score += 1; reasons.push("Multiple privacy-rights/law references"); }
+    for (const item of rawFindings) {
+      const existing = byCategory.get(item.category);
+      if (!existing || item.score > existing.score) {
+        byCategory.set(item.category, item);
+      }
+    }
 
-  const links = Array.from(document.querySelectorAll("a[href]"))
-    .map(a => {
-      const text = (a.innerText || a.getAttribute("aria-label") || "").trim().toLowerCase();
-      const hrefAbs = safeUrl(a.getAttribute("href") || "");
-      const inFooter = !!a.closest("footer");
-      const inNav = !!a.closest("nav");
-      return { text, href: hrefAbs, inFooter, inNav };
-    })
-    .filter(l => l.href && /^https?:\/\//i.test(l.href) && !l.href.endsWith("#"));
-
-  const linkCandidates = links
-    .map(l => {
-      const hay = `${l.text} ${l.href}`.toLowerCase();
-      if (!includesAny(hay, ["privacy", "policy", "legal"])) return null;
-
-      let ls = 0;
-      if (LINK_POSITIVE_TEXT.some(t => l.text.includes(t))) ls += 7;
-      else if (l.text.includes("privacy")) ls += 4;
-
-      const urlStrong = URL_REGEX_STRONG.some(rx => rx.test(l.href));
-      if (urlStrong) ls += 4;
-      if (/privacy|privacy[-_]?policy|privacy[-_]?notice|privacy[-_]?statement/i.test(l.href)) ls += 2;
-
-      if (l.inFooter) ls += 2;
-      if (l.inNav) ls += 1;
-
-      if (LINK_AMBIGUOUS_TEXT.some(t => l.text.includes(t)) && !urlStrong) ls -= 4;
-      if (LINK_NEGATIVE_TEXT.some(t => hay.includes(t))) ls -= 4;
-      if (hay.includes("cookie")) ls -= 2;
-
-      return { ...l, linkScore: ls };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.linkScore - a.linkScore);
-
-  const bestPolicyLink = linkCandidates[0]?.href || null;
-  const bestLinkScore = linkCandidates[0]?.linkScore || 0;
-
-  if (bestPolicyLink && bestLinkScore >= 9) {
-    score += 2;
-    reasons.push("Found a strong privacy policy link on this site");
-  } else if (bestPolicyLink && bestLinkScore >= 5) {
-    score += 1;
-    reasons.push("Found a likely privacy-related link");
+    return Array.from(byCategory.values()).sort((a, b) => b.score - a.score);
   }
 
-  score = Math.min(score, 10);
-  const confidence = score >= 8 ? "High" : score >= 5 ? "Medium" : "Low";
+  function extractFindings(sentences) {
+    const chunks = buildChunks(sentences);
+    const units = chunks.length ? chunks : sentences;
+    const findings = [];
 
-  const pageSignals = (urlLooksPolicy ? 1 : 0) + (titleLooksPolicy ? 1 : 0) + (h1LooksPolicy ? 1 : 0);
-  const isLikelyPolicyPage =
-    !looksNotPrivacy && (pageSignals >= 2 || (pageSignals >= 1 && sectionHits >= 6) || (sectionHits >= 9 && lawHits >= 1));
+    for (const rule of FINDING_RULES) {
+      const matched = [];
 
-  const data = isLikelyPolicyPage ? detectDataCategories(bodyText) : { found: {}, evidence: {}, summary: [] };
+      for (const unit of units) {
+        const detail = evidenceScore(rule, unit);
+        if (detail.score > 0) {
+          matched.push({
+            text: unit,
+            ...detail,
+          });
+        }
+      }
 
-  if (isLikelyPolicyPage) {
-    if (data.summary.length) reasons.push("Extracted data categories from policy text");
-    else reasons.push("Policy page detected, but data categories were unclear");
+      if (!matched.length) continue;
+
+      matched.sort((a, b) => b.score - a.score);
+
+      const topEvidence = cleanEvidenceForFinding(
+        rule,
+        matched,
+        MAX_EVIDENCE_PER_ITEM
+      );
+      const strongHits = matched.reduce((n, m) => n + m.strongHits, 0);
+      const mediumHits = matched.reduce((n, m) => n + m.mediumHits, 0);
+      const adTechHits = matched.reduce((n, m) => n + m.adTechHits, 0);
+      const negated = matched.some((m) => m.negated);
+      const permissionLimited = matched.some((m) => m.permissionLimited);
+      const safeContext = matched.some((m) => m.safeContext);
+
+      let confidence = determineConfidence(
+        strongHits,
+        mediumHits,
+        negated,
+        adTechHits
+      );
+      let severity = rule.severity;
+
+      if (topEvidence.length) {
+        severity = maybeLowerSeverityForContext(
+          rule,
+          topEvidence[0],
+          confidence
+        );
+      }
+
+      let score = rule.baseScore;
+
+      if (confidence === "explicit") score += 8;
+      else if (confidence === "likely") score += 4;
+      else if (confidence === "low") score -= 6;
+
+      if (severity === "high") score += 4;
+      else if (severity === "low") score -= 4;
+
+      if (negated && confidence !== "explicit") score -= 6;
+      if (permissionLimited) score -= 3;
+      if (safeContext && rule.category === "tracking") score -= 4;
+
+      score = Math.max(4, score);
+
+      const finding = {
+        category: rule.category,
+        title: rule.title,
+        summary: buildAdjustedSummary(
+          rule,
+          negated,
+          permissionLimited,
+          safeContext
+        ),
+        confidence,
+        severity,
+        score,
+        evidence: topEvidence,
+      };
+
+      finding.countAsRisk = shouldCountAsRisk(finding);
+      findings.push(finding);
+    }
+
+    return mergeFindings(findings);
+  }
+
+  function buildResult() {
+    const titleText = norm(document.title || "");
+    const urlText = window.location.href;
+    const mainText = getCandidateTextBlocks();
+    const fullText = getVisibleText();
+
+    const pageText = mainText || fullText;
+    const sentences = splitIntoSentences(pageText);
+
+    const pageScore = scorePolicyPage(pageText, titleText, urlText);
+    const isLikelyPolicyPage = pageScore >= 8;
+    const confidence = classifyPageConfidence(pageScore);
+
+    const { bestPolicyLink, bestLinkScore } = findBestPolicyLink();
+    const { dataCollected, dataEvidence } = extractDataCategories(sentences);
+
+    // Keep extracting categories for any page so later UI can support Option B,
+    // but only produce full privacy findings on likely policy pages.
+    const findings = isLikelyPolicyPage ? extractFindings(sentences) : [];
+    const countedRisks = findings.filter((f) => f.countAsRisk);
+
+    return {
+      isLikelyPolicyPage,
+      score: Math.max(0, Math.min(10, Math.round(pageScore / 2))),
+      confidence,
+      bestPolicyLink,
+      bestLinkScore,
+      reasons: countedRisks.slice(0, 6).map((f) => f.title),
+      findings,
+      countedRiskCount: countedRisks.length,
+      dataCollected,
+      dataEvidence,
+      pageTitle: titleText,
+      pageUrl: urlText,
+    };
+  }
+
+  function sendResult() {
+    try {
+      const result = buildResult();
+      chrome.runtime.sendMessage({
+        type: "heuristicResult",
+        result,
+      });
+    } catch (err) {
+      console.error("Heuristic content script failed:", err);
+    }
+  }
+
+  function debounce(fn, wait = 700) {
+    let t = null;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), wait);
+    };
+  }
+
+  const debouncedSend = debounce(sendResult, 900);
+
+  function runInitialChecks() {
+    sendResult();
+    window.setTimeout(debouncedSend, 1200);
+  }
+
+  if (
+    document.readyState === "complete" ||
+    document.readyState === "interactive"
+  ) {
+    runInitialChecks();
   } else {
-    reasons.push("Open the policy page to extract data categories");
+    window.addEventListener("DOMContentLoaded", runInitialChecks, {
+      once: true,
+    });
   }
 
-  return {
-    score,
-    confidence,
-    isLikelyPolicyPage,
-    bestPolicyLink,
-    bestLinkScore, // NEW: used by background to decide strong link
-    reasons,
-    dataCollected: data.found,
-    dataEvidence: data.evidence,
-    dataSummary: data.summary,
-    pageUrl: location.href,
-    pageTitle: document.title || ""
-  };
-}
+  window.addEventListener("load", debouncedSend, { once: true });
 
-// --- map heuristic -> toolbar state ---
-function computeRiskFromHeuristic(h) {
-  // Not on policy page yet: if strong link exists, show yellow.
-  if (!h.isLikelyPolicyPage) {
-    const hasStrongLink = !!h.bestPolicyLink && (h.bestLinkScore || 0) >= 9;
-    return { level: hasStrongLink ? "yellow" : "blue", riskScore: hasStrongLink ? 40 : 0, issuesCount: 0 };
-  }
-
-  const suspiciousCats = [
-    "cookies_tracking",
-    "sharing_third_parties",
-    "sensitive",
-    "biometric",
-    "children"
-  ];
-
-  const found = h.dataCollected || {};
-  const issuesCount = suspiciousCats.reduce((n, k) => n + (found[k] ? 1 : 0), 0);
-
-  let riskScore = issuesCount * 22;
-  if (h.confidence === "High") riskScore += 10;
-  if (h.confidence === "Low") riskScore -= 10;
-  riskScore = Math.max(0, Math.min(100, riskScore));
-
-  const level = riskScore >= 70 ? "red" : riskScore >= 35 ? "yellow" : "blue";
-  return { level, riskScore, issuesCount };
-}
-
-// =============================
-// AUTO-RUN (no refresh required)
-// =============================
-let lastSentKey = "";
-let lastUrl = location.href;
-
-function debounce(fn, wait = 600) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), wait);
-  };
-}
-
-function runHeuristicAndSend(reason = "init") {
-  const heuristic = detectPrivacyHeuristic();
-  const { level, riskScore, issuesCount } = computeRiskFromHeuristic(heuristic);
-
-  const key = JSON.stringify({
-    url: location.href,
-    isLikelyPolicyPage: heuristic.isLikelyPolicyPage,
-    bestPolicyLink: heuristic.bestPolicyLink,
-    bestLinkScore: heuristic.bestLinkScore || 0,
-    level,
-    issuesCount
+  // Lighter observer approach: only react to meaningful body changes.
+  const observer = new MutationObserver(() => {
+    debouncedSend();
   });
 
-  if (key === lastSentKey) return;
-  lastSentKey = key;
-
-  chrome.runtime.sendMessage({
-    type: "heuristicResult",
-    result: heuristic,
-    level,
-    riskScore,
-    issuesCount,
-    reason
-  });
-}
-
-const debouncedRun = debounce(() => runHeuristicAndSend("dom_mutation"), 700);
-
-// 1) run once at start
-runHeuristicAndSend("init");
-
-// 2) DOM changes (footer loads late, dynamic content)
-const observer = new MutationObserver(() => debouncedRun());
-observer.observe(document.documentElement, { childList: true, subtree: true });
-
-// 3) SPA URL changes (no refresh)
-setInterval(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    lastSentKey = "";
-    runHeuristicAndSend("url_change");
+  if (document.body) {
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
   }
-}, 800);
+
+  // Handle SPA-style URL changes.
+  let lastHref = location.href;
+  const urlWatcher = new MutationObserver(() => {
+    if (location.href !== lastHref) {
+      lastHref = location.href;
+      debouncedSend();
+    }
+  });
+
+  urlWatcher.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+})();
