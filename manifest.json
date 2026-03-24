@@ -20,8 +20,13 @@
     "128": "icons/EvilEye128.png" },
 
   "background": {
-    "service_worker": "background.js"
-  },
+  "service_worker": "background.js",
+  "type": "module"
+},
+
+
+
+  
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
@@ -31,4 +36,8 @@
       "run_at": "document_idle"
     }
   ]
+
+
+
+  
 }
