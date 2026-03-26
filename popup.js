@@ -1,5 +1,61 @@
 // popup.js
 
+function setCardVisibility(card, shouldShow) {
+  if (!card) return;
+
+  card.style.overflow = "hidden";
+  card.style.transition =
+    "opacity 180ms ease, transform 180ms ease, max-height 220ms ease";
+  card.style.willChange = "opacity, transform, max-height";
+
+  if (shouldShow) {
+    card.hidden = false;
+    card.style.display = "";
+
+    const targetHeight = card.scrollHeight;
+
+    card.style.opacity = "0";
+    card.style.transform = "translateY(-6px)";
+    card.style.maxHeight = "0px";
+
+    requestAnimationFrame(() => {
+      card.style.opacity = "1";
+      card.style.transform = "translateY(0)";
+      card.style.maxHeight = `${targetHeight}px`;
+    });
+
+    const onEnd = (e) => {
+      if (e.target !== card || e.propertyName !== "max-height") return;
+      card.style.maxHeight = "none";
+      card.removeEventListener("transitionend", onEnd);
+    };
+
+    card.addEventListener("transitionend", onEnd);
+    return;
+  }
+
+  if (card.hidden) return;
+
+  const currentHeight = card.scrollHeight;
+  card.style.maxHeight = `${currentHeight}px`;
+  card.style.opacity = "1";
+  card.style.transform = "translateY(0)";
+
+  requestAnimationFrame(() => {
+    card.style.opacity = "0";
+    card.style.transform = "translateY(-6px)";
+    card.style.maxHeight = "0px";
+  });
+
+  const onEnd = (e) => {
+    if (e.target !== card || e.propertyName !== "max-height") return;
+    card.hidden = true;
+    card.removeEventListener("transitionend", onEnd);
+  };
+
+  card.addEventListener("transitionend", onEnd);
+}
+
 function showToast(toastContainer, message, type = "info") {
   if (!toastContainer) return;
 
@@ -77,7 +133,7 @@ function getFindingsArray(findings) {
 
 function getCountedRisks(findings = []) {
   return getFindingsArray(findings).filter(
-    (f) => f && (f.countAsRisk === true)
+    (f) => f && f.countAsRisk === true
   );
 }
 
@@ -318,8 +374,7 @@ function setPolicyLinkUI(heuristicLink, heuristicOpen, link) {
 
 function renderHeuristic(els, r) {
   const {
-    finderCard,
-    summaryCard,
+    resultCard,
     policyFinderStatus,
     heuristicScore,
     heuristicLink,
@@ -330,98 +385,95 @@ function renderHeuristic(els, r) {
     heuristicSummary,
   } = els;
 
-  const findings = getFindingsArray(r?.findings);
-  const countedRisks = getCountedRisks(findings);
-  const riskStats = getRiskStats(findings);
-
   if (!r) {
-    if (finderCard) finderCard.style.display = "";
-    if (summaryCard) summaryCard.style.display = "none";
+    if (resultCard) {
+      resultCard.style.display = "";
+      resultCard.hidden = false;
+      resultCard.style.opacity = "";
+      resultCard.style.transform = "";
+      resultCard.style.maxHeight = "";
+    }
 
     if (policyFinderStatus) {
-      policyFinderStatus.textContent = "No page checked yet.";
+      policyFinderStatus.textContent = "No policy analysis available yet.";
     }
 
     if (heuristicScore) {
       heuristicScore.className = "status-text status-blue";
-      heuristicScore.textContent =
-        "Refresh the page to check for a privacy policy.";
+      heuristicScore.textContent = "Refresh the page to analyze the site policy.";
     }
 
     if (heuristicSummary) {
-      heuristicSummary.textContent = "No heuristic result yet.";
+      heuristicSummary.textContent = "No policy analysis yet.";
     }
 
     setPolicyLinkUI(heuristicLink, heuristicOpen, "");
-
     renderReasonList(heuristicReasons, [], {
       emptyMessage: "No meaningful risks are available yet.",
     });
-    renderChecklist(dataChecklist, {}, {}, { isPolicyPage: false });
+    renderChecklist(dataChecklist, {}, {}, { isPolicyPage: true });
     renderFindings(heuristicFindings, [], {
       emptyMessage: "No meaningful privacy risks are available yet.",
     });
     return;
   }
 
-  if (!r.isLikelyPolicyPage) {
-    if (finderCard) finderCard.style.display = "";
-    if (summaryCard) summaryCard.style.display = "none";
+  const findings = getFindingsArray(r.findings);
+  const countedRisks = getCountedRisks(findings);
+  const riskStats = getRiskStats(findings);
 
-    if (policyFinderStatus) {
-      policyFinderStatus.textContent = r.bestPolicyLink
-        ? "Privacy policy not detected on this page. A likely policy link was found."
-        : "Privacy policy not detected on this page.";
+  const confidence = String(
+    r.confidence || r.policyConfidence || ""
+  ).trim().toLowerCase();
+
+  const hasPolicyTarget = Boolean(
+    r.isPolicyPage ||
+    r.usedLinkedPolicy ||
+    r.analyzedPolicyUrl ||
+    r.bestPolicyLink
+  );
+
+  const isConfidentPolicy =
+    hasPolicyTarget &&
+    ["high", "likely", "explicit"].includes(confidence);
+
+  if (resultCard) {
+    if (isConfidentPolicy) {
+      resultCard.style.display = "none";
+      resultCard.hidden = true;
+    } else {
+      resultCard.style.display = "";
+      resultCard.hidden = false;
+      resultCard.style.opacity = "";
+      resultCard.style.transform = "";
+      resultCard.style.maxHeight = "";
     }
-
-    if (heuristicScore) {
-      heuristicScore.className = "status-text status-blue";
-      heuristicScore.textContent = r.bestPolicyLink
-        ? "Likely policy link found."
-        : "No likely policy link was found.";
-    }
-
-    if (heuristicSummary) {
-      heuristicSummary.textContent = r.bestPolicyLink
-        ? "Open the likely policy page for full risk findings and policy-based evidence."
-        : "This page can still show estimated data categories below, but it is not being treated as the privacy policy.";
-    }
-
-    setPolicyLinkUI(heuristicLink, heuristicOpen, r.bestPolicyLink || "");
-
-    renderReasonList(heuristicReasons, [], {
-      emptyMessage:
-        "Meaningful privacy risks are only counted when a likely privacy policy page is open.",
-    });
-
-    renderChecklist(
-      dataChecklist,
-      r.dataCollected || {},
-      r.dataEvidence || {},
-      { isPolicyPage: false, allowEstimated: true }
-    );
-
-    renderFindings(heuristicFindings, [], {
-      emptyMessage:
-        "Open the likely policy page to see counted privacy risks and full evidence.",
-    });
-
-    return;
   }
 
-  if (finderCard) finderCard.style.display = "none";
-  if (summaryCard) summaryCard.style.display = "";
+  if (policyFinderStatus) {
+    if (isConfidentPolicy) {
+      policyFinderStatus.textContent =
+        "A privacy policy was confidently identified.";
+    } else if (r.usedLinkedPolicy) {
+      policyFinderStatus.textContent =
+        "Analyzed linked privacy policy in the background.";
+    } else if (r.isPolicyPage) {
+      policyFinderStatus.textContent = "Analyzed policy content.";
+    } else {
+      policyFinderStatus.textContent = "Analyzed page content.";
+    }
+  }
 
   if (heuristicSummary) {
     if (riskStats.total > 0) {
       heuristicSummary.textContent =
-        `This policy shows ${riskStats.total} meaningful privacy risk${riskStats.total === 1 ? "" : "s"}. Review the findings below for the biggest concerns.`;
+        `This policy shows ${riskStats.total} meaningful privacy risk${riskStats.total === 1 ? "" : "s"}.`;
     } else if (findings.length > 0) {
       heuristicSummary.textContent =
-        "This policy was detected, but only lower-impact or less certain findings were identified.";
+        "This policy was analyzed, but only lower-impact or less certain findings were identified.";
     } else {
       heuristicSummary.textContent =
-        "This appears to be the privacy policy, but no major privacy concerns were clearly detected.";
+        "No major privacy risks were clearly detected.";
     }
   }
 
@@ -443,7 +495,7 @@ function renderHeuristic(els, r) {
   }
 
   renderReasonList(heuristicReasons, countedRisks, {
-    emptyMessage: "No meaningful privacy risks were counted on this policy page.",
+    emptyMessage: "No meaningful privacy risks were counted.",
   });
 
   renderChecklist(
@@ -454,16 +506,66 @@ function renderHeuristic(els, r) {
   );
 
   renderFindings(heuristicFindings, countedRisks, {
-    emptyMessage: "No meaningful privacy risks were counted on this policy page.",
+    emptyMessage: "No meaningful privacy risks were counted.",
   });
 
-  setPolicyLinkUI(heuristicLink, heuristicOpen, r.bestPolicyLink || "");
+  const analyzedUrl = r.analyzedPolicyUrl || r.bestPolicyLink || "";
+  setPolicyLinkUI(heuristicLink, heuristicOpen, analyzedUrl);
+}
+
+function renderMismatch(mismatch) {
+  const mismatchCard = document.getElementById("mismatch-card");
+  const mismatchStatus = document.getElementById("mismatch-status");
+  const mismatchSummary = document.getElementById("mismatch-summary");
+  const mismatchList = document.getElementById("mismatch-list");
+
+  if (!mismatchCard || !mismatchStatus || !mismatchSummary || !mismatchList) {
+    return;
+  }
+
+  mismatchList.innerHTML = "";
+
+  if (!mismatch || mismatch.show !== true) {
+    mismatchCard.style.display = "none";
+    mismatchStatus.textContent = "";
+    mismatchSummary.textContent = "";
+    return;
+  }
+
+  mismatchCard.style.display = "";
+
+  const level = String(mismatch.level || "").toLowerCase();
+
+  mismatchStatus.className = "status-text";
+  if (level === "strong_mismatch") {
+    mismatchStatus.classList.add("status-red");
+    mismatchStatus.textContent = "High-impact undisclosed behavior";
+  } else {
+    mismatchStatus.classList.add("status-yellow");
+    mismatchStatus.textContent = "Possible undisclosed behavior";
+  }
+
+  mismatchSummary.textContent =
+    mismatch.summary ||
+    "Some meaningful page behavior was detected without clear policy disclosure.";
+
+  const topItems = Array.isArray(mismatch.mismatches)
+    ? mismatch.mismatches.slice(0, 4)
+    : [];
+
+  for (const item of topItems) {
+    const li = document.createElement("li");
+    li.textContent =
+      item.message || "Possible policy-behavior mismatch detected.";
+    mismatchList.appendChild(li);
+  }
 }
 
 async function loadHeuristicIntoPopup(els) {
   const tab = await getActiveTab();
   if (!tab?.id) {
     renderHeuristic(els, null);
+    renderMismatch(null);
     return null;
   }
 
@@ -473,6 +575,7 @@ async function loadHeuristicIntoPopup(els) {
       (res) => {
         const r = res?.result || null;
         renderHeuristic(els, r);
+        renderMismatch(r?.mismatch || null);
         resolve(r);
       }
     );
@@ -485,10 +588,10 @@ async function init() {
   const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
 
   const heuristicEls = {
+    resultCard: document.getElementById("policy-result-card"),
     finderCard: document.getElementById("policy-finder-card"),
     summaryCard: document.getElementById("policy-summary-card"),
     policyFinderStatus: document.getElementById("policy-finder-status"),
-
     heuristicScore: document.getElementById("heuristic-score"),
     heuristicLink: document.getElementById("heuristic-link"),
     heuristicOpen: document.getElementById("heuristic-open"),

@@ -1,4 +1,4 @@
-import { HEURISTIC_BY_TAB } from "./lib/cache.js";
+import { setTabCache, getTabCache, clearTabCache } from "./lib/cache.js";
 import {
   normalizeHeuristicResult,
   computeFromHeuristic,
@@ -17,13 +17,15 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
     });
 
     // Prevent stale popup data while new page loads.
-    if (info.url) delete HEURISTIC_BY_TAB[tabId];
+    if (info.url) {
+      clearTabCache(tabId);
+    }
   }
 });
 
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
-  delete HEURISTIC_BY_TAB[tabId];
+  clearTabCache(tabId);
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -44,7 +46,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (tabId != null) {
       const normalized = normalizeHeuristicResult(msg.result);
 
-      HEURISTIC_BY_TAB[tabId] = normalized;
+      setTabCache(tabId, normalized);
 
       const computed = computeFromHeuristic(normalized);
       setToolbar(tabId, computed).catch((err) => {
@@ -58,7 +60,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 0.5) Popup asks for heuristic result
   if (msg.type === "getHeuristic") {
     const tabId = msg.tabId;
-    sendResponse({ ok: true, result: HEURISTIC_BY_TAB[tabId] || null });
+    sendResponse({ ok: true, result: getTabCache(tabId) || null });
     return true;
   }
 

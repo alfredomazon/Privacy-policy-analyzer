@@ -13,31 +13,31 @@
         <img src="icons/EvilEye48.png" alt="Evil Eye logo" />
         <div class="brand-text">
           <div class="brand-title">Evil Eye</div>
-          <div class="brand-subtitle">Privacy policy analyzer</div>
+          <div class="brand-subtitle">Data Snitch</div>
         </div>
       </div>
     </div>
 
-    <!-- Unified top result card -->
     <div id="policy-result-card" class="card">
       <div class="row-between">
-        <div class="section-title" style="margin-bottom: 0;">Page result</div>
+        <div class="section-title" style="margin-bottom: 0;">Policy analysis</div>
         <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
       </div>
 
       <div style="height: 10px;"></div>
 
-      <!-- Finder mode (kept for popup.js compatibility) -->
       <div id="policy-finder-card">
+        <div class="small muted" style="margin-bottom: 6px;">Policy source</div>
         <div id="policy-finder-status" class="summary-box">
-          This page does not appear to be the privacy policy.
+          Analyzing policy source…
         </div>
       </div>
 
-      <!-- Summary mode (kept for popup.js compatibility) -->
+      <div style="height: 10px;"></div>
+
       <div id="policy-summary-card">
         <div id="heuristic-summary" class="summary-box">
-          No heuristic result yet.
+          No policy analysis yet.
         </div>
 
         <div style="height: 10px;"></div>
@@ -47,7 +47,7 @@
 
       <div style="height: 10px;"></div>
 
-      <div class="small muted" style="margin-bottom: 6px;">Likely policy link</div>
+      <div class="small muted" style="margin-bottom: 6px;">Analyzed policy URL</div>
       <div id="heuristic-link" class="link-box">—</div>
 
       <div style="height: 10px;"></div>
@@ -60,6 +60,17 @@
     <div class="card">
       <div class="section-title">Top counted risks</div>
       <div id="heuristic-findings"></div>
+    </div>
+
+    <div class="card" id="mismatch-card">
+      <div class="section-title">Policy vs Behavior</div>
+      <div id="mismatch-status" class="status-text status-blue">
+        No mismatch analysis yet.
+      </div>
+      <div id="mismatch-summary" class="summary-box" style="margin-top: 10px;">
+        Open a page and refresh the extension.
+      </div>
+      <ul id="mismatch-list" class="clean-list" style="margin-top: 10px;"></ul>
     </div>
 
     <details>

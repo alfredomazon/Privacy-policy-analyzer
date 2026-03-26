@@ -493,3 +493,38 @@ details summary::-webkit-details-marker {
 .toast.error {
   border-color: rgba(239, 91, 91, 0.45);
 }
+#mismatch-card .clean-list {
+  margin-top: 8px;
+}
+
+#mismatch-card .clean-list li {
+  margin-bottom: 6px;
+}
+
+.card-enter,
+.card-exit {
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    max-height 220ms ease,
+    margin 180ms ease,
+    padding 180ms ease;
+  overflow: hidden;
+}
+
+.card-enter {
+  opacity: 1;
+  transform: translateY(0);
+  max-height: 1000px;
+}
+
+.card-exit {
+  opacity: 0;
+  transform: translateY(-6px);
+  max-height: 0;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  pointer-events: none;
+}
