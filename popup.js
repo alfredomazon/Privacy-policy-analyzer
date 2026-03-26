@@ -1,61 +1,5 @@
 // popup.js
 
-function setCardVisibility(card, shouldShow) {
-  if (!card) return;
-
-  card.style.overflow = "hidden";
-  card.style.transition =
-    "opacity 180ms ease, transform 180ms ease, max-height 220ms ease";
-  card.style.willChange = "opacity, transform, max-height";
-
-  if (shouldShow) {
-    card.hidden = false;
-    card.style.display = "";
-
-    const targetHeight = card.scrollHeight;
-
-    card.style.opacity = "0";
-    card.style.transform = "translateY(-6px)";
-    card.style.maxHeight = "0px";
-
-    requestAnimationFrame(() => {
-      card.style.opacity = "1";
-      card.style.transform = "translateY(0)";
-      card.style.maxHeight = `${targetHeight}px`;
-    });
-
-    const onEnd = (e) => {
-      if (e.target !== card || e.propertyName !== "max-height") return;
-      card.style.maxHeight = "none";
-      card.removeEventListener("transitionend", onEnd);
-    };
-
-    card.addEventListener("transitionend", onEnd);
-    return;
-  }
-
-  if (card.hidden) return;
-
-  const currentHeight = card.scrollHeight;
-  card.style.maxHeight = `${currentHeight}px`;
-  card.style.opacity = "1";
-  card.style.transform = "translateY(0)";
-
-  requestAnimationFrame(() => {
-    card.style.opacity = "0";
-    card.style.transform = "translateY(-6px)";
-    card.style.maxHeight = "0px";
-  });
-
-  const onEnd = (e) => {
-    if (e.target !== card || e.propertyName !== "max-height") return;
-    card.hidden = true;
-    card.removeEventListener("transitionend", onEnd);
-  };
-
-  card.addEventListener("transitionend", onEnd);
-}
-
 function showToast(toastContainer, message, type = "info") {
   if (!toastContainer) return;
 
@@ -105,8 +49,8 @@ function formatSeverity(severity) {
   return map[v] || severity || "";
 }
 
-function getCategoryMessage(key, isPolicyPage) {
-  const prefix = isPolicyPage
+function getCategoryMessage(key, isPolicyLikeSource) {
+  const prefix = isPolicyLikeSource
     ? "The policy suggests"
     : "This page may suggest";
 
@@ -157,6 +101,32 @@ function getRiskStats(findings = []) {
 
 function hasDetectedCategories(dataCollected = {}) {
   return Object.values(dataCollected || {}).some(Boolean);
+}
+
+function getSourceState(result) {
+  const sourceType = String(result?.policySourceType || "").toLowerCase();
+
+  if (sourceType === "current-policy-page") {
+    return {
+      type: "current-policy-page",
+      isPolicyLikeSource: true,
+      label: "Current privacy policy page",
+    };
+  }
+
+  if (sourceType === "linked-policy") {
+    return {
+      type: "linked-policy",
+      isPolicyLikeSource: true,
+      label: "Linked privacy policy",
+    };
+  }
+
+  return {
+    type: "page-fallback",
+    isPolicyLikeSource: false,
+    label: "Current page content",
+  };
 }
 
 function renderFindings(findingsEl, findings = [], options = {}) {
@@ -248,7 +218,7 @@ function renderChecklist(
   dataChecklist.innerHTML = "";
 
   const {
-    isPolicyPage = false,
+    isPolicyLikeSource = false,
     allowEstimated = true,
   } = options;
 
@@ -268,7 +238,7 @@ function renderChecklist(
 
   const hasAny = hasDetectedCategories(dataCollected || {});
 
-  if (!isPolicyPage && !allowEstimated) {
+  if (!isPolicyLikeSource && !allowEstimated) {
     const note = document.createElement("div");
     note.className = "checklist-note";
     note.textContent = "Open the policy page to extract detected data types.";
@@ -279,18 +249,18 @@ function renderChecklist(
   if (!hasAny) {
     const note = document.createElement("div");
     note.className = "checklist-note";
-    note.textContent = isPolicyPage
-      ? "Privacy policy detected, but no clear data-type signals were found."
+    note.textContent = isPolicyLikeSource
+      ? "The analyzed policy source did not show clear data-type signals."
       : "No clear privacy-related data categories were estimated from this page.";
     dataChecklist.appendChild(note);
     return;
   }
 
-  if (!isPolicyPage) {
+  if (!isPolicyLikeSource) {
     const note = document.createElement("div");
     note.className = "checklist-note";
     note.textContent =
-      "Estimated from current page content. Open the likely policy page for full policy-based analysis.";
+      "Estimated from current page content. Open or analyze a privacy policy source for stronger policy-based results.";
     dataChecklist.appendChild(note);
   }
 
@@ -315,7 +285,7 @@ function renderChecklist(
     if (checked) {
       const impact = document.createElement("div");
       impact.className = "check-evidence";
-      impact.textContent = getCategoryMessage(key, isPolicyPage);
+      impact.textContent = getCategoryMessage(key, isPolicyLikeSource);
       text.appendChild(impact);
     }
 
@@ -389,9 +359,6 @@ function renderHeuristic(els, r) {
     if (resultCard) {
       resultCard.style.display = "";
       resultCard.hidden = false;
-      resultCard.style.opacity = "";
-      resultCard.style.transform = "";
-      resultCard.style.maxHeight = "";
     }
 
     if (policyFinderStatus) {
@@ -411,7 +378,7 @@ function renderHeuristic(els, r) {
     renderReasonList(heuristicReasons, [], {
       emptyMessage: "No meaningful risks are available yet.",
     });
-    renderChecklist(dataChecklist, {}, {}, { isPolicyPage: true });
+    renderChecklist(dataChecklist, {}, {}, { isPolicyLikeSource: false });
     renderFindings(heuristicFindings, [], {
       emptyMessage: "No meaningful privacy risks are available yet.",
     });
@@ -421,59 +388,56 @@ function renderHeuristic(els, r) {
   const findings = getFindingsArray(r.findings);
   const countedRisks = getCountedRisks(findings);
   const riskStats = getRiskStats(findings);
-
-  const confidence = String(
-    r.confidence || r.policyConfidence || ""
-  ).trim().toLowerCase();
-
-  const hasPolicyTarget = Boolean(
-    r.isPolicyPage ||
-    r.usedLinkedPolicy ||
-    r.analyzedPolicyUrl ||
-    r.bestPolicyLink
-  );
-
-  const isConfidentPolicy =
-    hasPolicyTarget &&
-    ["high", "likely", "explicit"].includes(confidence);
+  const sourceState = getSourceState(r);
 
   if (resultCard) {
-    if (isConfidentPolicy) {
-      resultCard.style.display = "none";
-      resultCard.hidden = true;
-    } else {
-      resultCard.style.display = "";
-      resultCard.hidden = false;
-      resultCard.style.opacity = "";
-      resultCard.style.transform = "";
-      resultCard.style.maxHeight = "";
-    }
+    resultCard.style.display = "";
+    resultCard.hidden = false;
   }
 
   if (policyFinderStatus) {
-    if (isConfidentPolicy) {
+    if (sourceState.type === "current-policy-page") {
+      policyFinderStatus.textContent = "You are viewing the privacy policy page.";
+    } else if (sourceState.type === "linked-policy") {
       policyFinderStatus.textContent =
-        "A privacy policy was confidently identified.";
-    } else if (r.usedLinkedPolicy) {
-      policyFinderStatus.textContent =
-        "Analyzed linked privacy policy in the background.";
-    } else if (r.isPolicyPage) {
-      policyFinderStatus.textContent = "Analyzed policy content.";
+        "These results come from the site's linked privacy policy, not this current page.";
     } else {
-      policyFinderStatus.textContent = "Analyzed page content.";
+      policyFinderStatus.textContent =
+        "No trusted privacy policy source was found. Results below are based on current page content only.";
     }
   }
 
   if (heuristicSummary) {
-    if (riskStats.total > 0) {
-      heuristicSummary.textContent =
-        `This policy shows ${riskStats.total} meaningful privacy risk${riskStats.total === 1 ? "" : "s"}.`;
-    } else if (findings.length > 0) {
-      heuristicSummary.textContent =
-        "This policy was analyzed, but only lower-impact or less certain findings were identified.";
+    if (sourceState.type === "current-policy-page") {
+      if (riskStats.total > 0) {
+        heuristicSummary.textContent =
+          `This privacy policy shows ${riskStats.total} meaningful risk${riskStats.total === 1 ? "" : "s"}.`;
+      } else if (findings.length > 0) {
+        heuristicSummary.textContent =
+          "This privacy policy was analyzed, but only lower-impact or less certain findings were identified.";
+      } else {
+        heuristicSummary.textContent =
+          "No major privacy risks were clearly detected on this policy page.";
+      }
+    } else if (sourceState.type === "linked-policy") {
+      if (riskStats.total > 0) {
+        heuristicSummary.textContent =
+          `The linked privacy policy shows ${riskStats.total} meaningful risk${riskStats.total === 1 ? "" : "s"}.`;
+      } else if (findings.length > 0) {
+        heuristicSummary.textContent =
+          "The linked privacy policy was analyzed, but only lower-impact or less certain findings were identified.";
+      } else {
+        heuristicSummary.textContent =
+          "The linked privacy policy was analyzed, and no major privacy risks were clearly detected.";
+      }
     } else {
-      heuristicSummary.textContent =
-        "No major privacy risks were clearly detected.";
+      if (riskStats.total > 0) {
+        heuristicSummary.textContent =
+          `Current page content suggests ${riskStats.total} meaningful privacy risk${riskStats.total === 1 ? "" : "s"}, but no trusted policy source was confirmed.`;
+      } else {
+        heuristicSummary.textContent =
+          "No trusted privacy policy source was confirmed. Current page content did not show major privacy risks.";
+      }
     }
   }
 
@@ -502,7 +466,10 @@ function renderHeuristic(els, r) {
     dataChecklist,
     r.dataCollected || {},
     r.dataEvidence || {},
-    { isPolicyPage: true, allowEstimated: true }
+    {
+      isPolicyLikeSource: sourceState.isPolicyLikeSource,
+      allowEstimated: true,
+    }
   );
 
   renderFindings(heuristicFindings, countedRisks, {
