@@ -9,6 +9,8 @@ const TOGGLE_KEY = "gpt5Enabled";
 const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
 const TOKEN_KEY = "gpt5ExtensionToken";
 
+const TOOLBAR_STATE_BY_TAB = new Map();
+
 // Show “Scanning…” while page is loading/navigating
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") {
@@ -16,9 +18,10 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
       console.error("Failed to set scanning state:", err);
     });
 
-    // Prevent stale popup data while new page loads.
+    // Only clear cached result when the tab URL actually changes.
     if (info.url) {
       clearTabCache(tabId);
+      TOOLBAR_STATE_BY_TAB.delete(tabId);
     }
   }
 });
@@ -26,6 +29,7 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearTabCache(tabId);
+  TOOLBAR_STATE_BY_TAB.delete(tabId);
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -36,35 +40,55 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return;
+function sameToolbarState(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
-  // 0) Content script sends heuristic result
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg?.type) return;
+
+  // Content script sends heuristic result
   if (msg.type === "heuristicResult") {
     const tabId = sender.tab?.id;
+    const tabUrl = sender.tab?.url || "";
 
     if (tabId != null) {
       const normalized = normalizeHeuristicResult(msg.result);
-
-      setTabCache(tabId, normalized);
+      setTabCache(tabId, tabUrl, normalized);
 
       const computed = computeFromHeuristic(normalized);
-      setToolbar(tabId, computed).catch((err) => {
-        console.error("Failed to update toolbar:", err);
-      });
+      const previousState = TOOLBAR_STATE_BY_TAB.get(tabId);
+
+      if (!sameToolbarState(previousState, computed)) {
+        TOOLBAR_STATE_BY_TAB.set(tabId, computed);
+
+        setToolbar(tabId, computed).catch((err) => {
+          console.error("Failed to update toolbar:", err);
+        });
+      }
     }
 
     return;
   }
 
-  // 0.5) Popup asks for heuristic result
+  // Popup asks for cached heuristic result
   if (msg.type === "getHeuristic") {
     const tabId = msg.tabId;
-    sendResponse({ ok: true, result: getTabCache(tabId) || null });
+
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        sendResponse({ ok: true, result: null });
+        return;
+      }
+
+      const result = getTabCache(tabId, tab.url || "");
+      sendResponse({ ok: true, result: result || null });
+    });
+
     return true;
   }
 
-  // 1) Popup asks: what's toggle state?
+  // Popup asks for toggle state
   if (msg.type === "getStatus") {
     chrome.storage.local.get([TOGGLE_KEY], (res) => {
       sendResponse({ enabled: !!res[TOGGLE_KEY] });
@@ -72,7 +96,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // 2) Popup says: set toggle state
+  // Popup sets toggle state
   if (msg.type === "setStatus") {
     chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
       sendResponse({ ok: true });
@@ -80,7 +104,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // 3) Popup asks background to call your server
+  // Popup asks background to call server
   if (msg.type === "analyzePolicy") {
     (async () => {
       try {
@@ -104,6 +128,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
         const r = await fetch(`${SERVER_URL}/analyze`, {
           method: "POST",
           headers: {
@@ -111,7 +138,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             "X-Extension-Token": token,
           },
           body: JSON.stringify({ text: msg.text }),
+          signal: controller.signal,
         });
+
+        clearTimeout(timeoutId);
 
         const data = await r.json().catch(() => null);
 
@@ -126,7 +156,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         sendResponse({ ok: true, data });
       } catch (err) {
-        sendResponse({ ok: false, error: err?.message || String(err) });
+        sendResponse({
+          ok: false,
+          error:
+            err?.name === "AbortError"
+              ? "Analysis request timed out."
+              : err?.message || String(err),
+        });
       }
     })();
 

@@ -289,13 +289,13 @@ function renderChecklist(
       text.appendChild(impact);
     }
 
-    const ev = (dataEvidence?.[key] || []).slice(0, 2);
-    if (checked && ev.length) {
-      const quote = document.createElement("div");
-      quote.className = "check-quote";
-      quote.textContent = "Evidence: " + ev.join(" • ");
-      text.appendChild(quote);
-    }
+//    const ev = (dataEvidence?.[key] || []).slice(0, 2);
+// if (checked && ev.length) {
+//   const quote = document.createElement("div");
+//   quote.className = "check-quote";
+//   quote.textContent = `Evidence: ${ev[0]}${ev[1] ? " • " + ev[1] : ""}`;
+//   text.appendChild(quote);
+// }
 
     row.appendChild(box);
     row.appendChild(text);
