@@ -20,7 +20,7 @@
 
     <div id="policy-result-card" class="card">
       <div class="row-between">
-        <div class="section-title" style="margin-bottom: 0;">Policy analysis</div>
+        <div class="section-title" style="margin-bottom: 0;">Policy Detector</div>
         <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
       </div>
 
@@ -36,30 +36,45 @@
       <div style="height: 10px;"></div>
 
       <div id="policy-summary-card">
-        <div id="heuristic-summary" class="summary-box">
-          No policy analysis yet.
+        <div class="small muted" style="margin-bottom: 6px;">Policy result</div>
+        <div id="heuristic-score" class="status-text status-blue">
+          Refresh the page to analyze the site policy.
         </div>
 
         <div style="height: 10px;"></div>
 
-        <div id="heuristic-score" class="status-text"></div>
+        <div id="heuristic-summary" class="summary-box">
+          No policy analysis yet.
+        </div>
       </div>
 
-      <div style="height: 10px;"></div>
+      <div style="height: 12px;"></div>
 
-      <div class="small muted" style="margin-bottom: 6px;">Analyzed policy URL</div>
-      <div id="heuristic-link" class="link-box">—</div>
-
-      <div style="height: 10px;"></div>
-
-      <div class="button-row">
-        <button id="heuristic-open" type="button" disabled>Open policy page</button>
+      <div>
+        <div class="small muted" style="margin-bottom: 6px;">Quick reasons</div>
+        <div class="card inner-card">
+          <ul id="heuristic-reasons" class="clean-list"></ul>
+        </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="section-title">Top counted risks</div>
-      <div id="heuristic-findings"></div>
+      <div style="height: 12px;"></div>
+
+      <details>
+        <summary>
+          <span>Policy link</span>
+          <span class="summary-caret">Expand</span>
+        </summary>
+        <div class="details-content">
+          <div class="small muted" style="margin-bottom: 6px;">Analyzed policy URL</div>
+          <div id="heuristic-link" class="link-box">—</div>
+
+          <div style="height: 10px;"></div>
+
+          <div class="button-row">
+            <button id="heuristic-open" type="button" disabled>Open policy page</button>
+          </div>
+        </div>
+      </details>
     </div>
 
     <div class="card" id="mismatch-card">
@@ -75,12 +90,12 @@
 
     <details>
       <summary>
-        <span>What this may mean</span>
+        <span>Top counted risks</span>
         <span class="summary-caret">Expand</span>
       </summary>
       <div class="details-content">
         <div class="card inner-card">
-          <ul id="heuristic-reasons" class="clean-list"></ul>
+          <div id="heuristic-findings"></div>
         </div>
       </div>
     </details>
