@@ -11,25 +11,120 @@ const TOKEN_KEY = "gpt5ExtensionToken";
 
 const TOOLBAR_STATE_BY_TAB = new Map();
 
+function sameToolbarState(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function safeComputeToolbarState(result) {
+  try {
+    const normalized = normalizeHeuristicResult(result);
+    const computed = computeFromHeuristic(normalized);
+
+    return {
+      normalized,
+      computed,
+    };
+  } catch (err) {
+    console.error("Failed to normalize or compute toolbar state:", err);
+
+    return {
+      normalized: result || null,
+      computed: {
+        score: 0,
+        issuesCount: 0,
+        levelHint: "none",
+        summary: "No analysis yet",
+      },
+    };
+  }
+}
+
+async function updateToolbarIfChanged(tabId, computed) {
+  const previousState = TOOLBAR_STATE_BY_TAB.get(tabId);
+
+  if (sameToolbarState(previousState, computed)) {
+    return;
+  }
+
+  TOOLBAR_STATE_BY_TAB.set(tabId, computed);
+
+  try {
+    await setToolbar(tabId, computed);
+  } catch (err) {
+    console.error("Failed to update toolbar:", err);
+  }
+}
+
+function resetTabState(tabId) {
+  clearTabCache(tabId);
+  TOOLBAR_STATE_BY_TAB.delete(tabId);
+}
+
+async function setScanningForTab(tabId) {
+  try {
+    await setScanningState(tabId);
+  } catch (err) {
+    console.error("Failed to set scanning state:", err);
+  }
+}
+
+function getStoredToggleState() {
+  return chrome.storage.local.get([TOGGLE_KEY]);
+}
+
+function getStoredToken() {
+  return chrome.storage.local.get([TOKEN_KEY]);
+}
+
+async function callAnalyzeServer(text, token) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(`${SERVER_URL}/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Extension-Token": token,
+      },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: data?.error || `HTTP ${response.status}`,
+        details: data,
+      };
+    }
+
+    return {
+      ok: true,
+      data,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Show “Scanning…” while page is loading/navigating
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === "loading") {
-    setScanningState(tabId).catch((err) => {
-      console.error("Failed to set scanning state:", err);
-    });
+    setScanningForTab(tabId);
 
-    // Only clear cached result when the tab URL actually changes.
+    // Only clear cached result when the URL actually changes.
     if (info.url) {
-      clearTabCache(tabId);
-      TOOLBAR_STATE_BY_TAB.delete(tabId);
+      resetTabState(tabId);
     }
   }
 });
 
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
-  clearTabCache(tabId);
-  TOOLBAR_STATE_BY_TAB.delete(tabId);
+  resetTabState(tabId);
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -40,10 +135,6 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-function sameToolbarState(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg?.type) return;
 
@@ -52,22 +143,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     const tabUrl = sender.tab?.url || "";
 
-    if (tabId != null) {
-      const normalized = normalizeHeuristicResult(msg.result);
-      setTabCache(tabId, tabUrl, normalized);
-
-      const computed = computeFromHeuristic(normalized);
-      const previousState = TOOLBAR_STATE_BY_TAB.get(tabId);
-
-      if (!sameToolbarState(previousState, computed)) {
-        TOOLBAR_STATE_BY_TAB.set(tabId, computed);
-
-        setToolbar(tabId, computed).catch((err) => {
-          console.error("Failed to update toolbar:", err);
-        });
-      }
+    if (tabId == null) {
+      return;
     }
 
+    const { normalized, computed } = safeComputeToolbarState(msg.result);
+
+    try {
+      setTabCache(tabId, tabUrl, normalized);
+    } catch (err) {
+      console.error("Failed to cache heuristic result:", err);
+    }
+
+    updateToolbarIfChanged(tabId, computed);
     return;
   }
 
@@ -81,8 +169,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      const result = getTabCache(tabId, tab.url || "");
-      sendResponse({ ok: true, result: result || null });
+      try {
+        const result = getTabCache(tabId, tab.url || "");
+        sendResponse({ ok: true, result: result || null });
+      } catch (err) {
+        console.error("Failed to read cached heuristic result:", err);
+        sendResponse({ ok: true, result: null });
+      }
     });
 
     return true;
@@ -108,7 +201,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "analyzePolicy") {
     (async () => {
       try {
-        const toggleRes = await chrome.storage.local.get([TOGGLE_KEY]);
+        const toggleRes = await getStoredToggleState();
+
         if (!toggleRes[TOGGLE_KEY]) {
           sendResponse({
             ok: false,
@@ -117,7 +211,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        const stored = await chrome.storage.local.get([TOKEN_KEY]);
+        const stored = await getStoredToken();
         const token = stored[TOKEN_KEY];
 
         if (!token) {
@@ -128,33 +222,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        const r = await fetch(`${SERVER_URL}/analyze`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Extension-Token": token,
-          },
-          body: JSON.stringify({ text: msg.text }),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        const data = await r.json().catch(() => null);
-
-        if (!r.ok) {
-          sendResponse({
-            ok: false,
-            error: data?.error || `HTTP ${r.status}`,
-            details: data,
-          });
-          return;
-        }
-
-        sendResponse({ ok: true, data });
+        const result = await callAnalyzeServer(msg.text, token);
+        sendResponse(result);
       } catch (err) {
         sendResponse({
           ok: false,

@@ -129,6 +129,22 @@ function getSourceState(result) {
   };
 }
 
+function getShortText(item) {
+  return (
+    item?.title ||
+    item?.summary ||
+    "Possible privacy concern detected."
+  );
+}
+
+function sortByShortestText(items = []) {
+  return [...items].sort((a, b) => {
+    const aText = getShortText(a);
+    const bText = getShortText(b);
+    return aText.length - bText.length;
+  });
+}
+
 function renderFindings(findingsEl, findings = [], options = {}) {
   if (!findingsEl) return;
   findingsEl.innerHTML = "";
@@ -138,7 +154,7 @@ function renderFindings(findingsEl, findings = [], options = {}) {
     limit = 6,
   } = options;
 
-  const list = getCountedRisks(findings).slice(0, limit);
+  const list = sortByShortestText(getCountedRisks(findings)).slice(0, limit);
 
   if (!list.length) {
     const note = document.createElement("div");
@@ -289,13 +305,13 @@ function renderChecklist(
       text.appendChild(impact);
     }
 
-//    const ev = (dataEvidence?.[key] || []).slice(0, 2);
-// if (checked && ev.length) {
-//   const quote = document.createElement("div");
-//   quote.className = "check-quote";
-//   quote.textContent = `Evidence: ${ev[0]}${ev[1] ? " • " + ev[1] : ""}`;
-//   text.appendChild(quote);
-// }
+    // const ev = (dataEvidence?.[key] || []).slice(0, 2);
+    // if (checked && ev.length) {
+    //   const quote = document.createElement("div");
+    //   quote.className = "check-quote";
+    //   quote.textContent = `Evidence: ${ev[0]}${ev[1] ? " • " + ev[1] : ""}`;
+    //   text.appendChild(quote);
+    // }
 
     row.appendChild(box);
     row.appendChild(text);
@@ -309,10 +325,10 @@ function renderReasonList(listEl, findings = [], options = {}) {
 
   const {
     emptyMessage = "No major privacy concerns were clearly detected yet.",
-    limit = 6,
+    limit = 3,
   } = options;
 
-  const list = getCountedRisks(findings).slice(0, limit);
+  const list = sortByShortestText(getCountedRisks(findings)).slice(0, limit);
 
   if (!list.length) {
     const li = document.createElement("li");
@@ -323,8 +339,7 @@ function renderReasonList(listEl, findings = [], options = {}) {
 
   for (const item of list) {
     const li = document.createElement("li");
-    li.textContent =
-      item.title || item.summary || "Possible privacy concern detected.";
+    li.textContent = getShortText(item);
     listEl.appendChild(li);
   }
 }
@@ -377,6 +392,7 @@ function renderHeuristic(els, r) {
     setPolicyLinkUI(heuristicLink, heuristicOpen, "");
     renderReasonList(heuristicReasons, [], {
       emptyMessage: "No meaningful risks are available yet.",
+      limit: 3,
     });
     renderChecklist(dataChecklist, {}, {}, { isPolicyLikeSource: false });
     renderFindings(heuristicFindings, [], {
@@ -408,36 +424,11 @@ function renderHeuristic(els, r) {
   }
 
   if (heuristicSummary) {
-    if (sourceState.type === "current-policy-page") {
-      if (riskStats.total > 0) {
-        heuristicSummary.textContent =
-          `This privacy policy shows ${riskStats.total} meaningful risk${riskStats.total === 1 ? "" : "s"}.`;
-      } else if (findings.length > 0) {
-        heuristicSummary.textContent =
-          "This privacy policy was analyzed, but only lower-impact or less certain findings were identified.";
-      } else {
-        heuristicSummary.textContent =
-          "No major privacy risks were clearly detected on this policy page.";
-      }
-    } else if (sourceState.type === "linked-policy") {
-      if (riskStats.total > 0) {
-        heuristicSummary.textContent =
-          `The linked privacy policy shows ${riskStats.total} meaningful risk${riskStats.total === 1 ? "" : "s"}.`;
-      } else if (findings.length > 0) {
-        heuristicSummary.textContent =
-          "The linked privacy policy was analyzed, but only lower-impact or less certain findings were identified.";
-      } else {
-        heuristicSummary.textContent =
-          "The linked privacy policy was analyzed, and no major privacy risks were clearly detected.";
-      }
+    if (riskStats.total > 0) {
+      heuristicSummary.textContent =
+        `${riskStats.total} privacy risk${riskStats.total === 1 ? "" : "s"} detected.`;
     } else {
-      if (riskStats.total > 0) {
-        heuristicSummary.textContent =
-          `Current page content suggests ${riskStats.total} meaningful privacy risk${riskStats.total === 1 ? "" : "s"}, but no trusted policy source was confirmed.`;
-      } else {
-        heuristicSummary.textContent =
-          "No trusted privacy policy source was confirmed. Current page content did not show major privacy risks.";
-      }
+      heuristicSummary.textContent = "No major privacy risks detected.";
     }
   }
 
@@ -460,6 +451,7 @@ function renderHeuristic(els, r) {
 
   renderReasonList(heuristicReasons, countedRisks, {
     emptyMessage: "No meaningful privacy risks were counted.",
+    limit: 3,
   });
 
   renderChecklist(
@@ -474,6 +466,7 @@ function renderHeuristic(els, r) {
 
   renderFindings(heuristicFindings, countedRisks, {
     emptyMessage: "No meaningful privacy risks were counted.",
+    limit: 6,
   });
 
   const analyzedUrl = r.analyzedPolicyUrl || r.bestPolicyLink || "";
