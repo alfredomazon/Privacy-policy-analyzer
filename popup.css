@@ -40,7 +40,75 @@ body {
   justify-content: space-between;
   gap: 12px;
 }
+.view-switch {
+  display: flex;
+  gap: 8px;
+}
 
+.view-tab {
+  flex: 1;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.view-tab.active {
+  background: var(--accent);
+  color: #081120;
+  border-color: transparent;
+}
+
+.popup-view {
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.popup-view.active {
+  display: flex;
+}
+
+.protect-intro {
+  font-size: 12px;
+}
+
+.protect-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.protect-option:last-of-type {
+  border-bottom: none;
+}
+
+.protect-option input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  transform: scale(1.05);
+}
+
+.protect-option-text {
+  min-width: 0;
+}
+
+.protect-option-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.protect-option-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin-top: 3px;
+}
 .brand {
   display: flex;
   align-items: center;

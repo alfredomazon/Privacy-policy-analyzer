@@ -1,5 +1,3 @@
-// popup.js
-
 function showToast(toastContainer, message, type = "info") {
   if (!toastContainer) return;
 
@@ -16,12 +14,21 @@ function showToast(toastContainer, message, type = "info") {
   }, 3500);
 }
 
-// ---------- Heuristic UI helpers ----------
+// ---------- Shared helpers ----------
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
 }
 
+function getHostnameFromUrl(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+// ---------- Heuristic UI helpers ----------
 function formatConfidence(confidence) {
   const v = String(confidence || "").trim().toLowerCase();
 
@@ -305,14 +312,6 @@ function renderChecklist(
       text.appendChild(impact);
     }
 
-    // const ev = (dataEvidence?.[key] || []).slice(0, 2);
-    // if (checked && ev.length) {
-    //   const quote = document.createElement("div");
-    //   quote.className = "check-quote";
-    //   quote.textContent = `Evidence: ${ev[0]}${ev[1] ? " • " + ev[1] : ""}`;
-    //   text.appendChild(quote);
-    // }
-
     row.appendChild(box);
     row.appendChild(text);
     dataChecklist.appendChild(row);
@@ -542,6 +541,100 @@ async function loadHeuristicIntoPopup(els) {
   });
 }
 
+// ---------- Manual protection UI helpers ----------
+const DEFAULT_PROTECTION_RULES = {
+  blockTrackers: false,
+  blockThirdPartyScripts: false,
+  blockIframes: false,
+  removeAds: false,
+  disableTrackingLinks: false,
+};
+
+function getProtectionEls() {
+  return {
+    siteLabel: document.getElementById("protect-site-label"),
+    blockTrackers: document.getElementById("protect-block-trackers"),
+    blockThirdPartyScripts: document.getElementById("protect-block-third-party-scripts"),
+    blockIframes: document.getElementById("protect-block-iframes"),
+    removeAds: document.getElementById("protect-remove-ads"),
+    disableTrackingLinks: document.getElementById("protect-disable-tracking-links"),
+    saveBtn: document.getElementById("protect-save"),
+    resetBtn: document.getElementById("protect-reset"),
+    status: document.getElementById("protect-status"),
+  };
+}
+
+function setProtectionUi(els, rules = {}) {
+  const merged = { ...DEFAULT_PROTECTION_RULES, ...rules };
+
+  els.blockTrackers.checked = !!merged.blockTrackers;
+  els.blockThirdPartyScripts.checked = !!merged.blockThirdPartyScripts;
+  els.blockIframes.checked = !!merged.blockIframes;
+  els.removeAds.checked = !!merged.removeAds;
+  els.disableTrackingLinks.checked = !!merged.disableTrackingLinks;
+}
+
+function readProtectionUi(els) {
+  return {
+    blockTrackers: !!els.blockTrackers.checked,
+    blockThirdPartyScripts: !!els.blockThirdPartyScripts.checked,
+    blockIframes: !!els.blockIframes.checked,
+    removeAds: !!els.removeAds.checked,
+    disableTrackingLinks: !!els.disableTrackingLinks.checked,
+  };
+}
+
+async function loadProtectionRulesIntoPopup(els, tab) {
+  const hostname = getHostnameFromUrl(tab?.url || "");
+
+  if (!hostname) {
+    els.siteLabel.textContent = "Unsupported page";
+    els.status.textContent = "Could not load site protection settings.";
+    els.saveBtn.disabled = true;
+    els.resetBtn.disabled = true;
+    setProtectionUi(els, DEFAULT_PROTECTION_RULES);
+    return { hostname: "", rules: { ...DEFAULT_PROTECTION_RULES } };
+  }
+
+  els.siteLabel.textContent = hostname;
+
+  const res = await chrome.runtime.sendMessage({
+    type: "GET_RULES_FOR_ACTIVE_TAB",
+  });
+
+  const rules = res?.ok && res?.rules
+    ? { ...DEFAULT_PROTECTION_RULES, ...res.rules }
+    : { ...DEFAULT_PROTECTION_RULES };
+
+  setProtectionUi(els, rules);
+  els.status.textContent = "Manual controls are ready for this site.";
+  els.saveBtn.disabled = false;
+  els.resetBtn.disabled = false;
+
+  return { hostname, rules };
+}
+
+// ---------- Popup view switch ----------
+function activateView(viewName) {
+  const scanTab = document.getElementById("tab-scan");
+  const protectTab = document.getElementById("tab-protect");
+  const scanView = document.getElementById("view-scan");
+  const protectView = document.getElementById("view-protect");
+
+  scanTab.classList.remove("active");
+  protectTab.classList.remove("active");
+  scanView.classList.remove("active");
+  protectView.classList.remove("active");
+
+  if (viewName === "protect") {
+    protectTab.classList.add("active");
+    protectView.classList.add("active");
+  } else {
+    scanTab.classList.add("active");
+    scanView.classList.add("active");
+  }
+}
+
 async function init() {
   const toastContainer = document.getElementById("toast-container");
   const autoBtn = document.getElementById("auto-analyze");
@@ -561,7 +654,11 @@ async function init() {
     heuristicSummary: document.getElementById("heuristic-summary"),
   };
 
+  const protectionEls = getProtectionEls();
+  const activeTab = await getActiveTab();
+
   let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
+  let protectionState = await loadProtectionRulesIntoPopup(protectionEls, activeTab);
 
   if (heuristicRefreshBtn) {
     heuristicRefreshBtn.addEventListener("click", async () => {
@@ -576,6 +673,65 @@ async function init() {
       latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
       showToast(toastContainer, "Summary refreshed", "info");
     });
+  }
+
+  if (protectionEls.saveBtn) {
+    protectionEls.saveBtn.addEventListener("click", async () => {
+      const rules = readProtectionUi(protectionEls);
+
+      const res = await chrome.runtime.sendMessage({
+        type: "SET_RULES_FOR_HOST",
+        hostname: protectionState.hostname,
+        rules,
+      });
+
+      if (res?.ok) {
+        protectionEls.status.className = "status-text status-green";
+        protectionEls.status.textContent =
+          "Protection settings saved for this site.";
+        showToast(toastContainer, "Protection saved", "success");
+      } else {
+        protectionEls.status.className = "status-text status-red";
+        protectionEls.status.textContent =
+          "Failed to save protection settings.";
+        showToast(toastContainer, "Failed to save protection", "error");
+      }
+    });
+  }
+
+  if (protectionEls.resetBtn) {
+    protectionEls.resetBtn.addEventListener("click", async () => {
+      setProtectionUi(protectionEls, DEFAULT_PROTECTION_RULES);
+
+      const res = await chrome.runtime.sendMessage({
+        type: "SET_RULES_FOR_HOST",
+        hostname: protectionState.hostname,
+        rules: { ...DEFAULT_PROTECTION_RULES },
+      });
+
+      if (res?.ok) {
+        protectionEls.status.className = "status-text status-blue";
+        protectionEls.status.textContent =
+          "Protection settings reset for this site.";
+        showToast(toastContainer, "Protection reset", "info");
+      } else {
+        protectionEls.status.className = "status-text status-red";
+        protectionEls.status.textContent =
+          "Failed to reset protection settings.";
+        showToast(toastContainer, "Failed to reset protection", "error");
+      }
+    });
+  }
+
+  const scanTab = document.getElementById("tab-scan");
+  const protectTab = document.getElementById("tab-protect");
+
+  if (scanTab) {
+    scanTab.addEventListener("click", () => activateView("scan"));
+  }
+
+  if (protectTab) {
+    protectTab.addEventListener("click", () => activateView("protect"));
   }
 
   function initDetailsToggles() {
@@ -595,6 +751,7 @@ async function init() {
   }
 
   initDetailsToggles();
+  activateView("scan");
 }
 
 document.addEventListener("DOMContentLoaded", init);
