@@ -10,81 +10,185 @@
   <div class="wrap">
     <div class="topbar">
       <div class="brand">
-        <img src="icons/EvilEye48.png" alt="Evil Eye logo" />
+        <img id="brand-eye" src="icons/EvilEye48.png" alt="Evil Eye logo" />
         <div class="brand-text">
           <div class="brand-title">Evil Eye</div>
-          <div class="brand-subtitle">Privacy policy analyzer</div>
+          <div class="brand-subtitle">Data Snitch</div>
         </div>
       </div>
     </div>
 
-    <!-- Unified top result card -->
-    <div id="policy-result-card" class="card">
-      <div class="row-between">
-        <div class="section-title" style="margin-bottom: 0;">Page result</div>
-        <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
-      </div>
-
-      <div style="height: 10px;"></div>
-
-      <!-- Finder mode (kept for popup.js compatibility) -->
-      <div id="policy-finder-card">
-        <div id="policy-finder-status" class="summary-box">
-          This page does not appear to be the privacy policy.
-        </div>
-      </div>
-
-      <!-- Summary mode (kept for popup.js compatibility) -->
-      <div id="policy-summary-card">
-        <div id="heuristic-summary" class="summary-box">
-          No heuristic result yet.
-        </div>
-
-        <div style="height: 10px;"></div>
-
-        <div id="heuristic-score" class="status-text"></div>
-      </div>
-
-      <div style="height: 10px;"></div>
-
-      <div class="small muted" style="margin-bottom: 6px;">Likely policy link</div>
-      <div id="heuristic-link" class="link-box">—</div>
-
-      <div style="height: 10px;"></div>
-
-      <div class="button-row">
-        <button id="heuristic-open" type="button" disabled>Open policy page</button>
-      </div>
+    <!-- View switch -->
+    <div class="view-switch">
+      <button id="tab-scan" class="view-tab active" type="button">Scan</button>
+      <button id="tab-protect" class="view-tab" type="button">Protect</button>
     </div>
 
-    <div class="card">
-      <div class="section-title">Top counted risks</div>
-      <div id="heuristic-findings"></div>
+    <!-- =========================
+         VIEW 1: SCAN / ANALYZER
+    ========================== -->
+    <div id="view-scan" class="popup-view active">
+      <div id="policy-result-card" class="card">
+        <div class="row-between">
+          <div class="section-title flush">Policy Detector</div>
+          <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
+        </div>
+
+        <div id="policy-finder-card" class="section-block">
+          <div class="section-label">Policy source</div>
+          <div class="summary-box policy-source-box">
+            <div id="policy-finder-status">
+              Analyzing policy source…
+            </div>
+
+            <button id="policy-source-toggle" class="policy-source-toggle" type="button">
+              Show policy link
+            </button>
+
+            <div id="policy-source-link-row" class="policy-source-link-row">
+              <div class="policy-source-link-text">
+                <div class="small muted">Analyzed policy URL</div>
+                <div id="heuristic-link" class="policy-source-url">—</div>
+              </div>
+              <button id="heuristic-open" type="button" disabled>Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="policy-summary-card" class="section-block">
+          <div class="section-label">Policy result</div>
+          <div id="heuristic-score" class="status-text status-blue">
+            Refresh the page to analyze the site policy.
+          </div>
+
+          <div id="heuristic-summary-wrap">
+            <div id="heuristic-summary" class="summary-box">
+              No policy analysis yet.
+            </div>
+          </div>
+        </div>
+
+        <div id="quick-reasons-section" class="section-block">
+          <div class="section-label">Key policy highlights</div>
+          <div id="heuristic-reasons" class="quick-reasons"></div>
+        </div>
+
+      </div>
+
+      <details>
+        <summary>
+          <span>Policy data risks</span>
+          <span class="summary-caret">Expand</span>
+        </summary>
+        <div class="details-content">
+          <div class="card inner-card">
+            <div id="heuristic-findings"></div>
+          </div>
+        </div>
+      </details>
+
+      <details id="tracker-details">
+        <summary>
+          <span>Page trackers</span>
+          <span class="summary-caret">Expand</span>
+        </summary>
+        <div class="details-content">
+          <div id="tracker-summary" class="summary-box">
+            No tracker signals detected.
+          </div>
+          <div id="tracker-list" class="tracker-list"></div>
+        </div>
+      </details>
+
+      <div class="card" id="mismatch-card">
+        <div class="section-title">Policy vs Behavior</div>
+        <div id="mismatch-status" class="status-text status-blue">
+          No mismatch analysis yet.
+        </div>
+        <div id="mismatch-summary" class="summary-box stacked">
+          Open a page and refresh the extension.
+        </div>
+        <ul id="mismatch-list" class="clean-list stacked"></ul>
+      </div>
+
+      <details>
+        <summary>
+          <span>Detected data categories</span>
+          <span class="summary-caret">Expand</span>
+        </summary>
+        <div class="details-content">
+          <div class="card inner-card">
+            <div id="data-checklist"></div>
+          </div>
+        </div>
+      </details>
     </div>
 
-    <details>
-      <summary>
-        <span>What this may mean</span>
-        <span class="summary-caret">Expand</span>
-      </summary>
-      <div class="details-content">
-        <div class="card inner-card">
-          <ul id="heuristic-reasons" class="clean-list"></ul>
+    <!-- =========================
+         VIEW 2: MANUAL PROTECTION
+    ========================== -->
+    <div id="view-protect" class="popup-view">
+      <div class="card">
+        <div class="section-title">Manual Protection</div>
+        <div class="summary-box protect-intro">
+          Choose what to block on this site. These controls are manual and do not depend on the policy detector.
         </div>
-      </div>
-    </details>
 
-    <details>
-      <summary>
-        <span>Detected data categories</span>
-        <span class="summary-caret">Expand</span>
-      </summary>
-      <div class="details-content">
-        <div class="card inner-card">
-          <div id="data-checklist"></div>
+        <div class="section-block">
+          <div class="section-label">Current site</div>
+          <div id="protect-site-label" class="link-box">Loading current site…</div>
+        </div>
+
+        <label class="protect-option">
+          <input type="checkbox" id="protect-block-trackers" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Block known trackers</div>
+            <div class="protect-option-subtitle">Blocks known analytics and tracking domains.</div>
+          </div>
+        </label>
+
+        <label class="protect-option">
+          <input type="checkbox" id="protect-block-third-party-scripts" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Block third-party scripts</div>
+            <div class="protect-option-subtitle">Stops external scripts from other domains when possible.</div>
+          </div>
+        </label>
+
+        <label class="protect-option">
+          <input type="checkbox" id="protect-block-iframes" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Block third-party iframes</div>
+            <div class="protect-option-subtitle">Removes or blocks outside embeds and frames.</div>
+          </div>
+        </label>
+
+        <label class="protect-option">
+          <input type="checkbox" id="protect-remove-ads" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Remove obvious ads</div>
+            <div class="protect-option-subtitle">Hides common ad-like elements on the page.</div>
+          </div>
+        </label>
+
+        <label class="protect-option">
+          <input type="checkbox" id="protect-disable-tracking-links" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Disable tracking links</div>
+            <div class="protect-option-subtitle">Disables obvious redirect and tracking-style links.</div>
+          </div>
+        </label>
+
+        <div class="button-row section-block">
+          <button id="protect-save" class="primary" type="button">Save for this site</button>
+          <button id="protect-reset" type="button">Reset</button>
+        </div>
+
+        <div id="protect-status" class="status-text status-blue stacked">
+          No protection settings saved yet.
         </div>
       </div>
-    </details>
+    </div>
   </div>
 
   <div id="toast-container"></div>

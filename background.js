@@ -1,435 +1,481 @@
-// background.js (service worker)
+import { setTabCache, getTabCache, clearTabCache } from "./lib/cache.js";
+import {
+  normalizeHeuristicResult,
+  computeFromHeuristic,
+  scoreToLevel,
+} from "./lib/finalScore.js";
+import { setToolbar, setScanningState } from "./lib/iconManager.js";
+import { classifyTrackerUrl } from "./lib/trackerRegistry.js";
 
 const TOGGLE_KEY = "gpt5Enabled";
 const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
 const TOKEN_KEY = "gpt5ExtensionToken";
 
-// --- Heuristic cache (per tab) ---
-const HEURISTIC_BY_TAB = {};
+// Manual protection storage
+const MANUAL_SITE_RULES_KEY = "manualSiteRules";
 
-// --- Toolbar icons (use PNG for best reliability) ---
-const ICONS = {
-  blue: {
-    16: "icons/EvilEye16.png",
-    32: "icons/EvilEye32.png",
-    48: "icons/EvilEye48.png",
-    128: "icons/EvilEye128.png",
-  },
-  yellow: {
-    16: "icons/EvilEyeYellow16.png",
-    32: "icons/EvilEyeYellow32.png",
-    48: "icons/EvilEyeYellow48.png",
-    128: "icons/EvilEyeYellow128.png",
-  },
-  red: {
-    16: "icons/EvilEyeRed16.png",
-    32: "icons/EvilEyeRed32.png",
-    48: "icons/EvilEyeRed48.png",
-    128: "icons/EvilEyeRed128.png",
-  },
+const DEFAULT_MANUAL_RULES = {
+  blockTrackers: false,
+  blockThirdPartyScripts: false,
+  blockIframes: false,
+  removeAds: false,
+  disableTrackingLinks: false,
 };
 
-function scoreToLevel(score) {
-  if (score >= 70) return "red";
-  if (score >= 35) return "yellow";
-  return "blue";
+const TOOLBAR_STATE_BY_TAB = new Map();
+const LAST_URL_BY_TAB = new Map();
+const SCANNING_TABS = new Set();
+const NETWORK_TRACKER_SIGNALS_BY_TAB = new Map();
+const MAX_NETWORK_TRACKER_SIGNALS = 80;
+const PENDING_POLICY_EVIDENCE_BY_TAB = new Map();
+const POLICY_EVIDENCE_RETRY_DELAYS = [250, 700, 1400, 2600, 4200];
+
+function sameToolbarState(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+
+  return (
+    a.score === b.score &&
+    a.issuesCount === b.issuesCount &&
+    a.levelHint === b.levelHint &&
+    a.summary === b.summary
+  );
 }
 
-function normalizeConfidence(value) {
-  const v = String(value || "").trim().toLowerCase();
+function safeComputeToolbarState(result) {
+  try {
+    const normalized = normalizeHeuristicResult(result);
+    const computed = computeFromHeuristic(normalized);
+    const toolbarLevel = scoreToLevel(computed.score);
 
-  if (v === "explicit") return 1.25;
-  if (v === "high") return 1.15;
-  if (v === "likely") return 1.0;
-  if (v === "medium") return 0.9;
-  if (v === "possible") return 0.7;
-  if (v === "low") return 0.55;
-
-  return 0.75;
-}
-
-function normalizeSeverity(value) {
-  const v = String(value || "").trim().toLowerCase();
-
-  if (v === "high") return 1.3;
-  if (v === "medium") return 1.0;
-  if (v === "low") return 0.7;
-
-  return 1.0;
-}
-
-function categoryBaseWeight(category) {
-  switch (String(category || "").toLowerCase()) {
-    case "tracking":
-      return 22;
-    case "sharing":
-      return 20;
-    case "sale":
-      return 28;
-    case "sensitive":
-      return 26;
-    case "biometric":
-      return 30;
-    case "location":
-      return 18;
-    case "financial":
-      return 18;
-    case "children":
-      return 10;
-    case "retention":
-      return 8;
-    case "rights":
-      return 6;
-    case "identifiers":
-      return 8;
-    case "device_network":
-      return 8;
-    default:
-      return 10;
-  }
-}
-
-function titleFromLegacyKey(key) {
-  const map = {
-    identifiers: "This site may collect identifying information",
-    device_network: "This site may collect device or network information",
-    location: "Location data may be collected",
-    cookies_tracking: "This site may track your activity",
-    payment_financial: "Payment or financial data may be collected",
-    contacts_content: "Contacts or user-provided content may be collected",
-    biometric: "Biometric data may be collected",
-    sensitive: "Sensitive information may be collected",
-    children: "The policy mentions children or minors",
-    sharing_third_parties: "Your data may be shared with third parties",
-    retention_rights: "The policy mentions retention or privacy rights",
-  };
-
-  return map[key] || "Possible privacy concern detected";
-}
-
-function summaryFromLegacyKey(key) {
-  const map = {
-    identifiers:
-      "The policy suggests the site may collect identifying information such as your name, email, phone number, or IP address.",
-    device_network:
-      "The policy suggests the site may collect device or network information such as device identifiers, logs, or browser details.",
-    location:
-      "The policy suggests the site may collect your location information.",
-    cookies_tracking:
-      "The policy suggests cookies or similar tools may be used to monitor usage, analytics, or advertising.",
-    payment_financial:
-      "The policy suggests the site may collect payment or financial information.",
-    contacts_content:
-      "The policy suggests the site may collect contacts, messages, uploads, or other content you provide.",
-    biometric:
-      "The policy suggests biometric information may be collected or processed.",
-    sensitive:
-      "The policy suggests the site may collect sensitive personal information.",
-    children:
-      "The policy includes language about children or minors and how their data is handled.",
-    sharing_third_parties:
-      "The policy suggests information may be shared with vendors, service providers, or partners.",
-    retention_rights:
-      "The policy refers to data retention, deletion, access, or related privacy rights.",
-  };
-
-  return map[key] || "The policy may involve this type of data use.";
-}
-
-function categoryFromLegacyKey(key) {
-  const map = {
-    identifiers: "identifiers",
-    device_network: "device_network",
-    location: "location",
-    cookies_tracking: "tracking",
-    payment_financial: "financial",
-    contacts_content: "content",
-    biometric: "biometric",
-    sensitive: "sensitive",
-    children: "children",
-    sharing_third_parties: "sharing",
-    retention_rights: "retention",
-  };
-
-  return map[key] || "general";
-}
-
-function confidenceFromLegacyKey(key) {
-  const map = {
-    identifiers: "possible",
-    device_network: "possible",
-    location: "possible",
-    cookies_tracking: "likely",
-    payment_financial: "possible",
-    contacts_content: "possible",
-    biometric: "explicit",
-    sensitive: "likely",
-    children: "possible",
-    sharing_third_parties: "likely",
-    retention_rights: "possible",
-  };
-
-  return map[key] || "possible";
-}
-
-function severityFromLegacyKey(key) {
-  const map = {
-    identifiers: "low",
-    device_network: "low",
-    location: "medium",
-    cookies_tracking: "high",
-    payment_financial: "medium",
-    contacts_content: "medium",
-    biometric: "high",
-    sensitive: "high",
-    children: "low",
-    sharing_third_parties: "medium",
-    retention_rights: "low",
-  };
-
-  return map[key] || "medium";
-}
-
-function numericScoreFromLegacyKey(key) {
-  const map = {
-    identifiers: 8,
-    device_network: 8,
-    location: 16,
-    cookies_tracking: 24,
-    payment_financial: 16,
-    contacts_content: 14,
-    biometric: 30,
-    sensitive: 26,
-    children: 10,
-    sharing_third_parties: 22,
-    retention_rights: 8,
-  };
-
-  return map[key] || 10;
-}
-
-function shouldCountAsRisk(finding) {
-  const severity = String(finding?.severity || "").toLowerCase();
-  const confidence = String(finding?.confidence || "").toLowerCase();
-  const category = String(finding?.category || "").toLowerCase();
-
-  const severityQualifies = severity === "high" || severity === "medium";
-  const confidenceQualifies =
-    confidence === "likely" || confidence === "explicit";
-
-  const excludedCategories = new Set(["retention", "children"]);
-
-  if (!severityQualifies || !confidenceQualifies) return false;
-  if (excludedCategories.has(category)) return false;
-
-  return true;
-}
-
-function deriveFindingsFromLegacyResult(result) {
-  const found = result?.dataCollected || {};
-  const evidence = result?.dataEvidence || {};
-  const findings = [];
-
-  for (const [key, present] of Object.entries(found)) {
-    if (!present) continue;
-
-    const finding = {
-      category: categoryFromLegacyKey(key),
-      title: titleFromLegacyKey(key),
-      summary: summaryFromLegacyKey(key),
-      confidence: confidenceFromLegacyKey(key),
-      severity: severityFromLegacyKey(key),
-      score: numericScoreFromLegacyKey(key),
-      evidence: Array.isArray(evidence[key]) ? evidence[key].slice(0, 3) : [],
-      sourceKey: key,
+    return {
+      normalized:
+        normalized && typeof normalized === "object"
+          ? {
+              ...normalized,
+              toolbarState: {
+                ...computed,
+                level: toolbarLevel,
+              },
+            }
+          : normalized,
+      computed,
     };
+  } catch (err) {
+    console.error("Failed to normalize or compute toolbar state:", err);
 
-    finding.countAsRisk = shouldCountAsRisk(finding);
-    findings.push(finding);
+    return {
+      normalized: result || null,
+      computed: {
+        score: 0,
+        issuesCount: 0,
+        levelHint: "none",
+        summary: "No analysis yet",
+      },
+    };
+  }
+}
+
+async function updateToolbarIfChanged(tabId, computed, { force = false } = {}) {
+  const previousState = TOOLBAR_STATE_BY_TAB.get(tabId);
+
+  if (!force && sameToolbarState(previousState, computed)) {
+    return;
   }
 
-  return findings;
+  TOOLBAR_STATE_BY_TAB.set(tabId, computed);
+
+  try {
+    await setToolbar(tabId, computed);
+  } catch (err) {
+    console.error("Failed to update toolbar:", err);
+  }
 }
 
-function normalizeHeuristicResult(result) {
-  if (!result) return null;
+function cacheHeuristicForTab(
+  tabId,
+  tabUrl,
+  result,
+  { forceToolbar = false } = {}
+) {
+  if (tabId == null) return null;
 
-  const findings =
-    Array.isArray(result.findings) && result.findings.length
-      ? result.findings.map((f) => ({
-          ...f,
-          countAsRisk:
-            typeof f.countAsRisk === "boolean"
-              ? f.countAsRisk
-              : shouldCountAsRisk(f),
-        }))
-      : deriveFindingsFromLegacyResult(result);
+  const { normalized, computed } = safeComputeToolbarState(result);
 
-  const countedRiskCount =
-    typeof result.countedRiskCount === "number"
-      ? result.countedRiskCount
-      : findings.filter((f) => f.countAsRisk).length;
+  try {
+    setTabCache(tabId, tabUrl || "", normalized);
+    if (tabUrl) {
+      LAST_URL_BY_TAB.set(tabId, tabUrl);
+    }
+  } catch (err) {
+    console.error("Failed to cache heuristic result:", err);
+  }
 
+  clearScanningForTab(tabId);
+  updateToolbarIfChanged(tabId, computed, { force: forceToolbar });
+  return normalized;
+}
+
+async function requestHeuristicFromTab(
+  tabId,
+  { force = false, forceToolbar = false } = {}
+) {
+  if (tabId == null) return null;
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "REQUEST_HEURISTIC_RESULT",
+      force,
+    });
+
+    if (!response?.ok || !response.result) return null;
+
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    return cacheHeuristicForTab(tabId, tab?.url || "", response.result, {
+      forceToolbar,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resetTabState(tabId) {
+  clearTabCache(tabId);
+  TOOLBAR_STATE_BY_TAB.delete(tabId);
+  LAST_URL_BY_TAB.delete(tabId);
+  SCANNING_TABS.delete(tabId);
+  clearNetworkTrackerSignals(tabId);
+  clearPendingPolicyEvidence(tabId);
+}
+
+async function setScanningForTab(tabId) {
+  if (SCANNING_TABS.has(tabId)) return;
+
+  SCANNING_TABS.add(tabId);
+  TOOLBAR_STATE_BY_TAB.delete(tabId);
+
+  try {
+    await setScanningState(tabId);
+  } catch (err) {
+    console.error("Failed to set scanning state:", err);
+  }
+}
+
+function clearScanningForTab(tabId) {
+  SCANNING_TABS.delete(tabId);
+}
+
+function getStoredToggleState() {
+  return chrome.storage.local.get([TOGGLE_KEY]);
+}
+
+function getStoredToken() {
+  return chrome.storage.local.get([TOKEN_KEY]);
+}
+
+function getHostnameFromUrl(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function getNetworkTrackerSignals(tabId) {
+  return NETWORK_TRACKER_SIGNALS_BY_TAB.get(tabId) || [];
+}
+
+function clearNetworkTrackerSignals(tabId) {
+  NETWORK_TRACKER_SIGNALS_BY_TAB.delete(tabId);
+}
+
+function rememberPendingPolicyEvidence(tabId, payload) {
+  if (tabId == null || !payload?.quote) return;
+
+  PENDING_POLICY_EVIDENCE_BY_TAB.set(tabId, {
+    quote: String(payload.quote || ""),
+    url: String(payload.url || ""),
+    createdAt: Date.now(),
+  });
+}
+
+function clearPendingPolicyEvidence(tabId) {
+  PENDING_POLICY_EVIDENCE_BY_TAB.delete(tabId);
+}
+
+function schedulePolicyEvidenceHighlight(tabId, attempt = 0) {
+  const delay = POLICY_EVIDENCE_RETRY_DELAYS[attempt];
+  if (delay == null) return;
+
+  setTimeout(() => {
+    sendPendingPolicyEvidenceToTab(tabId, attempt);
+  }, delay);
+}
+
+async function sendPendingPolicyEvidenceToTab(tabId, attempt = 0) {
+  const pending = PENDING_POLICY_EVIDENCE_BY_TAB.get(tabId);
+  if (!pending) return;
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "HIGHLIGHT_POLICY_EVIDENCE",
+      ...pending,
+    });
+
+    if (response?.ok) {
+      clearPendingPolicyEvidence(tabId);
+      return;
+    }
+  } catch {
+    // The content script may not be loaded yet. Retry briefly below.
+  }
+
+  schedulePolicyEvidenceHighlight(tabId, attempt + 1);
+}
+
+function getNetworkSignalKey(signal) {
+  return [
+    signal.id || signal.vendor || "",
+    signal.sourceType || "",
+    signal.requestType || "",
+    signal.hostname || "",
+    signal.url || "",
+  ].join("|");
+}
+
+function rememberNetworkTrackerSignal(tabId, signal) {
+  if (tabId == null || tabId < 0 || !signal) return;
+
+  const current = NETWORK_TRACKER_SIGNALS_BY_TAB.get(tabId) || [];
+  const nextKey = getNetworkSignalKey(signal);
+
+  if (current.some((item) => getNetworkSignalKey(item) === nextKey)) {
+    return;
+  }
+
+  const next = [
+    ...current,
+    {
+      ...signal,
+      sourceType: signal.sourceType || "network",
+      observedAt: Date.now(),
+    },
+  ].slice(-MAX_NETWORK_TRACKER_SIGNALS);
+
+  NETWORK_TRACKER_SIGNALS_BY_TAB.set(tabId, next);
+}
+
+async function getAllManualSiteRules() {
+  const res = await chrome.storage.local.get([MANUAL_SITE_RULES_KEY]);
+  return res[MANUAL_SITE_RULES_KEY] || {};
+}
+
+async function getManualRulesForHost(hostname) {
+  const allRules = await getAllManualSiteRules();
   return {
-    ...result,
-    findings,
-    countedRiskCount,
+    ...DEFAULT_MANUAL_RULES,
+    ...(allRules[hostname] || {}),
   };
 }
 
-function computeRiskStats(findings = []) {
-  const countedRisks = findings.filter((f) => f.countAsRisk);
-  const highRisks = countedRisks.filter(
-    (f) => String(f.severity || "").toLowerCase() === "high"
-  );
-  const mediumRisks = countedRisks.filter(
-    (f) => String(f.severity || "").toLowerCase() === "medium"
-  );
+async function setManualRulesForHost(hostname, rules) {
+  const allRules = await getAllManualSiteRules();
 
-  return {
-    total: countedRisks.length,
-    high: highRisks.length,
-    medium: mediumRisks.length,
+  allRules[hostname] = {
+    blockTrackers: !!rules.blockTrackers,
+    blockThirdPartyScripts: !!rules.blockThirdPartyScripts,
+    blockIframes: !!rules.blockIframes,
+    removeAds: !!rules.removeAds,
+    disableTrackingLinks: !!rules.disableTrackingLinks,
   };
+
+  await chrome.storage.local.set({
+    [MANUAL_SITE_RULES_KEY]: allRules,
+  });
 }
 
-function computeMeaningfulRiskScore(findings = []) {
-  let rawScore = 0;
+/**
+ * Placeholder for DNR sync.
+ * Later you can import your DNR manager and call it here.
+ */
+async function syncManualProtectionRules(hostname, rules) {
+  // Example future hook:
+  // await syncDnrRulesForSite(hostname, rules);
+  return;
+}
 
-  for (const finding of findings) {
-    if (!finding.countAsRisk) continue;
+async function callAnalyzeServer(text, token) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    const base =
-      typeof finding.score === "number"
-        ? finding.score
-        : categoryBaseWeight(finding.category);
+  try {
+    const response = await fetch(`${SERVER_URL}/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Extension-Token": token,
+      },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
 
-    const conf = normalizeConfidence(finding.confidence);
-    const sev = normalizeSeverity(finding.severity);
+    const data = await response.json().catch(() => null);
 
-    let itemScore = base * conf * sev;
-
-    if (Array.isArray(finding.evidence) && finding.evidence.length) {
-      itemScore += 2;
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: data?.error || `HTTP ${response.status}`,
+        details: data,
+      };
     }
 
-    rawScore += itemScore;
+    return {
+      ok: true,
+      data,
+    };
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return rawScore;
 }
 
-function computeFromHeuristic(result) {
-  if (!result) {
+async function fetchLinkedPolicyDocument(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "omit",
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `HTTP ${response.status}`,
+      };
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+      return {
+        ok: false,
+        error: "not_html",
+      };
+    }
+
+    const html = await response.text();
+    if (!html) {
+      return {
+        ok: false,
+        error: "empty_html",
+      };
+    }
+
     return {
-      score: 0,
-      issuesCount: 0,
-      levelHint: "none",
-      summary: "No analysis yet",
+      ok: true,
+      url: response.url || url,
+      html,
     };
-  }
-
-  if (!result.isLikelyPolicyPage) {
-    const bestLinkScore = result.bestLinkScore || 0;
-    const hasStrongLink = !!result.bestPolicyLink && bestLinkScore >= 10;
-
+  } catch (err) {
     return {
-      score: 0,
-      issuesCount: 0,
-      levelHint: hasStrongLink ? "policy-link" : "none",
-      summary: hasStrongLink
-        ? "Likely policy link found"
-        : "No policy detected",
+      ok: false,
+      error:
+        err?.name === "AbortError"
+          ? "timeout"
+          : err?.message || String(err),
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const findings = Array.isArray(result.findings) ? result.findings : [];
-  const riskStats = computeRiskStats(findings);
-
-  let rawScore = computeMeaningfulRiskScore(findings);
-
-  const pageConfidence = String(
-    result.pageConfidence || result.confidence || ""
-  ).toLowerCase();
-
-  if (riskStats.total > 0) {
-    if (pageConfidence === "high") rawScore += 4;
-    if (pageConfidence === "low") rawScore -= 4;
-  }
-
-  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-
-  let summary = "Privacy policy detected";
-  if (riskStats.high > 0) summary = "High privacy concern";
-  else if (riskStats.medium > 0) summary = "Potential privacy concerns";
-  else if (findings.length > 0) summary = "Low-impact findings only";
-
-  return {
-    score,
-    issuesCount: riskStats.total,
-    levelHint:
-      riskStats.high > 0
-        ? "high-risk"
-        : riskStats.medium > 0
-        ? "policy-risk"
-        : "policy",
-    summary,
-  };
 }
 
-async function setToolbar(tabId, { score, issuesCount = 0, summary = "", levelHint = "none" }) {
-  const level = scoreToLevel(score);
+function shouldResetForNavigation(tabId, info) {
+  if (!info.url) return false;
 
-  await chrome.action.setIcon({ tabId, path: ICONS[level] });
+  const previousUrl = LAST_URL_BY_TAB.get(tabId) || "";
+  const nextUrl = info.url || "";
 
-  await chrome.action.setBadgeText({
-    tabId,
-    text: issuesCount ? String(Math.min(issuesCount, 99)) : "",
-  });
-
-  await chrome.action.setBadgeBackgroundColor({
-    tabId,
-    color:
-      level === "red"
-        ? "#D93025"
-        : level === "yellow"
-        ? "#F9AB00"
-        : "#1A73E8",
-  });
-
-  let title = "No policy detected yet";
-
-  if (levelHint === "policy-link") {
-    title = "Likely privacy policy link found — click to review";
-  } else if (levelHint === "policy") {
-    title =
-      issuesCount > 0
-        ? `${summary}: ${issuesCount} risk${issuesCount === 1 ? "" : "s"} flagged`
-        : "Privacy policy detected — no major risks flagged";
-  } else if (levelHint === "policy-risk") {
-    title = `${summary}: ${issuesCount} risk${issuesCount === 1 ? "" : "s"} flagged — click to review`;
-  } else if (levelHint === "high-risk") {
-    title = `${summary}: ${issuesCount} risk${issuesCount === 1 ? "" : "s"} flagged — click to review`;
+  if (!previousUrl) {
+    LAST_URL_BY_TAB.set(tabId, nextUrl);
+    return true;
   }
 
-  await chrome.action.setTitle({ tabId, title });
+  if (previousUrl !== nextUrl) {
+    LAST_URL_BY_TAB.set(tabId, nextUrl);
+    return true;
+  }
+
+  return false;
+}
+
+function handleTabLoading(tabId, info) {
+  setScanningForTab(tabId);
+
+  if (shouldResetForNavigation(tabId, info)) {
+    clearTabCache(tabId);
+    TOOLBAR_STATE_BY_TAB.delete(tabId);
+    clearNetworkTrackerSignals(tabId);
+  }
 }
 
 // Show “Scanning…” while page is loading/navigating
-chrome.tabs.onUpdated.addListener((tabId, info) => {
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "loading") {
-    chrome.action.setBadgeText({ tabId, text: "" });
-    chrome.action.setTitle({ tabId, title: "Scanning..." });
-
-    // Prevent stale popup data while new page loads.
-    if (info.url) delete HEURISTIC_BY_TAB[tabId];
+    handleTabLoading(tabId, info);
+    return;
   }
+
+  if (info.status === "complete") {
+    clearScanningForTab(tabId);
+
+    if (tab?.url) {
+      LAST_URL_BY_TAB.set(tabId, tab.url);
+    }
+  }
+});
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  requestHeuristicFromTab(tabId, { forceToolbar: true }).catch(() => null);
 });
 
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
-  delete HEURISTIC_BY_TAB[tabId];
+  resetTabState(tabId);
 });
+
+if (chrome.webRequest?.onBeforeRequest) {
+  chrome.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.tabId == null || details.tabId < 0) return;
+      if (details.type === "main_frame") return;
+
+      const pageUrl =
+        LAST_URL_BY_TAB.get(details.tabId) ||
+        details.documentUrl ||
+        details.initiator ||
+        "";
+      const pageHostname = getHostnameFromUrl(pageUrl);
+      if (!pageHostname) return;
+
+      const signal = classifyTrackerUrl({
+        url: details.url,
+        pageHostname,
+        sourceType: "network",
+        requestType: details.type || "",
+      });
+
+      if (signal) {
+        rememberNetworkTrackerSignal(details.tabId, signal);
+      }
+    },
+    { urls: ["<all_urls>"] }
+  );
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get([TOGGLE_KEY], (res) => {
@@ -437,43 +483,134 @@ chrome.runtime.onInstalled.addListener(() => {
       chrome.storage.local.set({ [TOGGLE_KEY]: false });
     }
   });
+
+  chrome.storage.local.get([MANUAL_SITE_RULES_KEY], (res) => {
+    if (res[MANUAL_SITE_RULES_KEY] === undefined) {
+      chrome.storage.local.set({ [MANUAL_SITE_RULES_KEY]: {} });
+    }
+  });
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete" && PENDING_POLICY_EVIDENCE_BY_TAB.has(tabId)) {
+    sendPendingPolicyEvidenceToTab(tabId, 0);
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || !msg.type) return;
+  if (!msg?.type) return false;
 
-  // ==============================
-  // 0) Content script sends heuristic result
-  // ==============================
   if (msg.type === "heuristicResult") {
     const tabId = sender.tab?.id;
+    const tabUrl = sender.tab?.url || "";
 
-    if (tabId != null) {
-      const normalized = normalizeHeuristicResult(msg.result);
-
-      HEURISTIC_BY_TAB[tabId] = normalized;
-
-      const computed = computeFromHeuristic(normalized);
-      setToolbar(tabId, computed).catch((err) => {
-        console.error("Failed to update toolbar:", err);
-      });
+    if (tabId == null) {
+      return false;
     }
 
-    return;
+    cacheHeuristicForTab(tabId, tabUrl, msg.result);
+    return false;
   }
 
-  // ==============================
-  // 0.5) Popup asks for heuristic result
-  // ==============================
   if (msg.type === "getHeuristic") {
-    const tabId = msg.tabId;
-    sendResponse({ ok: true, result: HEURISTIC_BY_TAB[tabId] || null });
+    (async () => {
+      const tabId = msg.tabId;
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+
+      if (!tab) {
+        sendResponse({ ok: true, result: null });
+        return;
+      }
+
+      try {
+        const cached = getTabCache(tabId, tab.url || "");
+        if (cached && !msg.force) {
+          const { computed } = safeComputeToolbarState(cached);
+          updateToolbarIfChanged(tabId, computed, {
+            force: !!msg.repaintToolbar,
+          });
+          sendResponse({ ok: true, result: cached });
+          return;
+        }
+
+        const refreshed = await requestHeuristicFromTab(tabId, {
+          force: !!msg.force,
+          forceToolbar: true,
+        });
+
+        sendResponse({ ok: true, result: refreshed || cached || null });
+      } catch (err) {
+        console.error("Failed to read cached heuristic result:", err);
+        sendResponse({ ok: true, result: null });
+      }
+    })();
+
     return true;
   }
 
-  // ==============================
-  // 1) Popup asks: what's toggle state?
-  // ==============================
+  if (msg.type === "GET_TRACKER_NETWORK_SIGNALS") {
+    const tabId = sender.tab?.id ?? msg.tabId;
+
+    sendResponse({
+      ok: true,
+      signals: tabId == null ? [] : getNetworkTrackerSignals(tabId),
+    });
+    return false;
+  }
+
+  if (msg.type === "OPEN_POLICY_EVIDENCE") {
+    (async () => {
+      try {
+        const url = typeof msg.url === "string" ? msg.url.trim() : "";
+        const quote = typeof msg.quote === "string" ? msg.quote.trim() : "";
+
+        if (!url || !quote) {
+          sendResponse({
+            ok: false,
+            error: "Missing policy URL or evidence quote.",
+          });
+          return;
+        }
+
+        const tab = await chrome.tabs.create({ url });
+        rememberPendingPolicyEvidence(tab.id, {
+          quote,
+          url,
+        });
+        schedulePolicyEvidenceHighlight(tab.id, 0);
+
+        sendResponse({ ok: true, tabId: tab.id });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  if (msg.type === "REQUEST_PENDING_POLICY_EVIDENCE") {
+    const tabId = sender.tab?.id;
+    const pending =
+      tabId == null ? null : PENDING_POLICY_EVIDENCE_BY_TAB.get(tabId);
+
+    sendResponse({
+      ok: true,
+      pending: pending || null,
+    });
+    return false;
+  }
+
+  if (msg.type === "POLICY_EVIDENCE_HIGHLIGHT_RESULT") {
+    if (sender.tab?.id != null && msg.ok) {
+      clearPendingPolicyEvidence(sender.tab.id);
+    }
+
+    return false;
+  }
+
   if (msg.type === "getStatus") {
     chrome.storage.local.get([TOGGLE_KEY], (res) => {
       sendResponse({ enabled: !!res[TOGGLE_KEY] });
@@ -481,9 +618,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // ==============================
-  // 2) Popup says: set toggle state
-  // ==============================
   if (msg.type === "setStatus") {
     chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
       sendResponse({ ok: true });
@@ -491,13 +625,108 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // ==============================
-  // 3) Popup says: analyze this text (GPT mode)
-  // ==============================
+  if (msg.type === "GET_RULES_FOR_ACTIVE_TAB") {
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+
+        const hostname = getHostnameFromUrl(tab?.url || "");
+
+        if (!hostname) {
+          sendResponse({
+            ok: false,
+            hostname: "",
+            rules: { ...DEFAULT_MANUAL_RULES },
+            error: "Unsupported page.",
+          });
+          return;
+        }
+
+        const rules = await getManualRulesForHost(hostname);
+
+        sendResponse({
+          ok: true,
+          hostname,
+          rules,
+        });
+      } catch (err) {
+        console.error("Failed to get manual rules for active tab:", err);
+        sendResponse({
+          ok: false,
+          hostname: "",
+          rules: { ...DEFAULT_MANUAL_RULES },
+          error: err?.message || "Unknown error.",
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  if (msg.type === "SET_RULES_FOR_HOST") {
+    (async () => {
+      try {
+        const hostname = String(msg.hostname || "").trim().toLowerCase();
+        const rules = msg.rules || {};
+
+        if (!hostname) {
+          sendResponse({
+            ok: false,
+            error: "Missing hostname.",
+          });
+          return;
+        }
+
+        await setManualRulesForHost(hostname, rules);
+        await syncManualProtectionRules(hostname, rules);
+
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+
+        if (tab?.id) {
+          chrome.tabs.sendMessage(tab.id, {
+            type: "RULES_UPDATED",
+            hostname,
+            rules: {
+              ...DEFAULT_MANUAL_RULES,
+              ...rules,
+            },
+          }).catch(() => {});
+        }
+
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.error("Failed to save manual rules:", err);
+        sendResponse({
+          ok: false,
+          error: err?.message || "Unknown error.",
+        });
+      }
+    })();
+
+    return true;
+  }
+
   if (msg.type === "analyzePolicy") {
     (async () => {
       try {
-        const toggleRes = await chrome.storage.local.get([TOGGLE_KEY]);
+        const text = typeof msg.text === "string" ? msg.text.trim() : "";
+
+        if (!text) {
+          sendResponse({
+            ok: false,
+            error: "No policy text was provided for analysis.",
+          });
+          return;
+        }
+
+        const toggleRes = await getStoredToggleState();
+
         if (!toggleRes[TOGGLE_KEY]) {
           sendResponse({
             ok: false,
@@ -506,7 +735,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        const stored = await chrome.storage.local.get([TOKEN_KEY]);
+        const stored = await getStoredToken();
         const token = stored[TOKEN_KEY];
 
         if (!token) {
@@ -517,32 +746,47 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return;
         }
 
-        const r = await fetch(`${SERVER_URL}/analyze`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Extension-Token": token,
-          },
-          body: JSON.stringify({ text: msg.text }),
-        });
-
-        const data = await r.json().catch(() => null);
-
-        if (!r.ok) {
-          sendResponse({
-            ok: false,
-            error: data?.error || `HTTP ${r.status}`,
-            details: data,
-          });
-          return;
-        }
-
-        sendResponse({ ok: true, data });
+        const result = await callAnalyzeServer(text, token);
+        sendResponse(result);
       } catch (err) {
-        sendResponse({ ok: false, error: err?.message || String(err) });
+        sendResponse({
+          ok: false,
+          error:
+            err?.name === "AbortError"
+              ? "Analysis request timed out."
+              : err?.message || String(err),
+        });
       }
     })();
 
     return true;
   }
+
+  if (msg.type === "FETCH_LINKED_POLICY_DOCUMENT") {
+    (async () => {
+      try {
+        const url = typeof msg.url === "string" ? msg.url.trim() : "";
+
+        if (!url) {
+          sendResponse({
+            ok: false,
+            error: "Missing URL.",
+          });
+          return;
+        }
+
+        const result = await fetchLinkedPolicyDocument(url);
+        sendResponse(result);
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  return false;
 });
