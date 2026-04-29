@@ -27,6 +27,8 @@ const LAST_URL_BY_TAB = new Map();
 const SCANNING_TABS = new Set();
 const NETWORK_TRACKER_SIGNALS_BY_TAB = new Map();
 const MAX_NETWORK_TRACKER_SIGNALS = 80;
+const PENDING_POLICY_EVIDENCE_BY_TAB = new Map();
+const POLICY_EVIDENCE_RETRY_DELAYS = [250, 700, 1400, 2600, 4200];
 
 function sameToolbarState(a, b) {
   if (a === b) return true;
@@ -74,10 +76,10 @@ function safeComputeToolbarState(result) {
   }
 }
 
-async function updateToolbarIfChanged(tabId, computed) {
+async function updateToolbarIfChanged(tabId, computed, { force = false } = {}) {
   const previousState = TOOLBAR_STATE_BY_TAB.get(tabId);
 
-  if (sameToolbarState(previousState, computed)) {
+  if (!force && sameToolbarState(previousState, computed)) {
     return;
   }
 
@@ -90,18 +92,67 @@ async function updateToolbarIfChanged(tabId, computed) {
   }
 }
 
+function cacheHeuristicForTab(
+  tabId,
+  tabUrl,
+  result,
+  { forceToolbar = false } = {}
+) {
+  if (tabId == null) return null;
+
+  const { normalized, computed } = safeComputeToolbarState(result);
+
+  try {
+    setTabCache(tabId, tabUrl || "", normalized);
+    if (tabUrl) {
+      LAST_URL_BY_TAB.set(tabId, tabUrl);
+    }
+  } catch (err) {
+    console.error("Failed to cache heuristic result:", err);
+  }
+
+  clearScanningForTab(tabId);
+  updateToolbarIfChanged(tabId, computed, { force: forceToolbar });
+  return normalized;
+}
+
+async function requestHeuristicFromTab(
+  tabId,
+  { force = false, forceToolbar = false } = {}
+) {
+  if (tabId == null) return null;
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "REQUEST_HEURISTIC_RESULT",
+      force,
+    });
+
+    if (!response?.ok || !response.result) return null;
+
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    return cacheHeuristicForTab(tabId, tab?.url || "", response.result, {
+      forceToolbar,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function resetTabState(tabId) {
   clearTabCache(tabId);
   TOOLBAR_STATE_BY_TAB.delete(tabId);
   LAST_URL_BY_TAB.delete(tabId);
   SCANNING_TABS.delete(tabId);
   clearNetworkTrackerSignals(tabId);
+  clearPendingPolicyEvidence(tabId);
 }
 
 async function setScanningForTab(tabId) {
   if (SCANNING_TABS.has(tabId)) return;
 
   SCANNING_TABS.add(tabId);
+  TOOLBAR_STATE_BY_TAB.delete(tabId);
 
   try {
     await setScanningState(tabId);
@@ -136,6 +187,50 @@ function getNetworkTrackerSignals(tabId) {
 
 function clearNetworkTrackerSignals(tabId) {
   NETWORK_TRACKER_SIGNALS_BY_TAB.delete(tabId);
+}
+
+function rememberPendingPolicyEvidence(tabId, payload) {
+  if (tabId == null || !payload?.quote) return;
+
+  PENDING_POLICY_EVIDENCE_BY_TAB.set(tabId, {
+    quote: String(payload.quote || ""),
+    url: String(payload.url || ""),
+    createdAt: Date.now(),
+  });
+}
+
+function clearPendingPolicyEvidence(tabId) {
+  PENDING_POLICY_EVIDENCE_BY_TAB.delete(tabId);
+}
+
+function schedulePolicyEvidenceHighlight(tabId, attempt = 0) {
+  const delay = POLICY_EVIDENCE_RETRY_DELAYS[attempt];
+  if (delay == null) return;
+
+  setTimeout(() => {
+    sendPendingPolicyEvidenceToTab(tabId, attempt);
+  }, delay);
+}
+
+async function sendPendingPolicyEvidenceToTab(tabId, attempt = 0) {
+  const pending = PENDING_POLICY_EVIDENCE_BY_TAB.get(tabId);
+  if (!pending) return;
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "HIGHLIGHT_POLICY_EVIDENCE",
+      ...pending,
+    });
+
+    if (response?.ok) {
+      clearPendingPolicyEvidence(tabId);
+      return;
+    }
+  } catch {
+    // The content script may not be loaded yet. Retry briefly below.
+  }
+
+  schedulePolicyEvidenceHighlight(tabId, attempt + 1);
 }
 
 function getNetworkSignalKey(signal) {
@@ -344,6 +439,10 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   }
 });
 
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  requestHeuristicFromTab(tabId, { forceToolbar: true }).catch(() => null);
+});
+
 // Cleanup cache when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
   resetTabState(tabId);
@@ -392,6 +491,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete" && PENDING_POLICY_EVIDENCE_BY_TAB.has(tabId)) {
+    sendPendingPolicyEvidenceToTab(tabId, 0);
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg?.type) return false;
 
@@ -403,39 +508,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return false;
     }
 
-    const { normalized, computed } = safeComputeToolbarState(msg.result);
-
-    try {
-      setTabCache(tabId, tabUrl, normalized);
-      if (tabUrl) {
-        LAST_URL_BY_TAB.set(tabId, tabUrl);
-      }
-    } catch (err) {
-      console.error("Failed to cache heuristic result:", err);
-    }
-
-    clearScanningForTab(tabId);
-    updateToolbarIfChanged(tabId, computed);
+    cacheHeuristicForTab(tabId, tabUrl, msg.result);
     return false;
   }
 
   if (msg.type === "getHeuristic") {
-    const tabId = msg.tabId;
+    (async () => {
+      const tabId = msg.tabId;
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
 
-    chrome.tabs.get(tabId, (tab) => {
-      if (chrome.runtime.lastError || !tab) {
+      if (!tab) {
         sendResponse({ ok: true, result: null });
         return;
       }
 
       try {
-        const result = getTabCache(tabId, tab.url || "");
-        sendResponse({ ok: true, result: result || null });
+        const cached = getTabCache(tabId, tab.url || "");
+        if (cached && !msg.force) {
+          const { computed } = safeComputeToolbarState(cached);
+          updateToolbarIfChanged(tabId, computed, {
+            force: !!msg.repaintToolbar,
+          });
+          sendResponse({ ok: true, result: cached });
+          return;
+        }
+
+        const refreshed = await requestHeuristicFromTab(tabId, {
+          force: !!msg.force,
+          forceToolbar: true,
+        });
+
+        sendResponse({ ok: true, result: refreshed || cached || null });
       } catch (err) {
         console.error("Failed to read cached heuristic result:", err);
         sendResponse({ ok: true, result: null });
       }
-    });
+    })();
 
     return true;
   }
@@ -447,6 +555,59 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       ok: true,
       signals: tabId == null ? [] : getNetworkTrackerSignals(tabId),
     });
+    return false;
+  }
+
+  if (msg.type === "OPEN_POLICY_EVIDENCE") {
+    (async () => {
+      try {
+        const url = typeof msg.url === "string" ? msg.url.trim() : "";
+        const quote = typeof msg.quote === "string" ? msg.quote.trim() : "";
+
+        if (!url || !quote) {
+          sendResponse({
+            ok: false,
+            error: "Missing policy URL or evidence quote.",
+          });
+          return;
+        }
+
+        const tab = await chrome.tabs.create({ url });
+        rememberPendingPolicyEvidence(tab.id, {
+          quote,
+          url,
+        });
+        schedulePolicyEvidenceHighlight(tab.id, 0);
+
+        sendResponse({ ok: true, tabId: tab.id });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  if (msg.type === "REQUEST_PENDING_POLICY_EVIDENCE") {
+    const tabId = sender.tab?.id;
+    const pending =
+      tabId == null ? null : PENDING_POLICY_EVIDENCE_BY_TAB.get(tabId);
+
+    sendResponse({
+      ok: true,
+      pending: pending || null,
+    });
+    return false;
+  }
+
+  if (msg.type === "POLICY_EVIDENCE_HIGHLIGHT_RESULT") {
+    if (sender.tab?.id != null && msg.ok) {
+      clearPendingPolicyEvidence(sender.tab.id);
+    }
+
     return false;
   }
 

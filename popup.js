@@ -56,6 +56,16 @@ function formatSeverity(severity) {
   return map[v] || severity || "";
 }
 
+function formatCategoryLabel(category = "") {
+  return String(category || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getFindingRiskLabel(item = {}) {
+  return item.riskLabel || item.riskType || formatCategoryLabel(item.category);
+}
+
 function getCategoryMessage(key, isPolicyLikeSource) {
   const prefix = isPolicyLikeSource
     ? "The policy suggests"
@@ -229,31 +239,21 @@ function getImmediateFindings(findings = [], limit = Infinity) {
   return highImpact.slice(0, limit);
 }
 
-function getSeverityIconPath(severity = "") {
-  const value = String(severity || "").toLowerCase();
-  if (value === "high") return "icons/EvilEyeRed32.png";
-  if (value === "medium") return "icons/EvilEyeYellow32.png";
-  return "icons/EvilEye32.png";
-}
-
-function setSeverityBadgeIcon(badge, severity = "") {
+function setSeverityBadgeLabel(badge, severity = "") {
   if (!badge) return;
 
   const label = formatSeverity(severity) || "Impact";
-  badge.textContent = "";
+  badge.textContent = label;
   badge.title = label;
   badge.setAttribute("aria-label", label);
-
-  const icon = document.createElement("img");
-  icon.className = "impact-eye-icon";
-  icon.src = getSeverityIconPath(severity);
-  icon.alt = "";
-  icon.setAttribute("aria-hidden", "true");
-  badge.appendChild(icon);
 }
 
 const EVIDENCE_KEYWORDS_BY_CATEGORY = {
   tracking: [
+    "targeted ads",
+    "public sources",
+    "public databases",
+    "social media",
     "targeted advertising",
     "personalized ads",
     "tracking technologies",
@@ -278,6 +278,20 @@ const EVIDENCE_KEYWORDS_BY_CATEGORY = {
     "cross-context behavioral advertising",
   ],
   location: ["precise location", "geolocation", "gps", "location"],
+  external_data: [
+    "data brokers",
+    "public sources",
+    "publicly available",
+    "public posts",
+    "social media",
+    "public databases",
+    "outside sources",
+    "third parties",
+    "partners",
+    "append",
+    "enrich",
+    "combine",
+  ],
   financial: ["payment", "billing", "financial", "credit card", "bank"],
   sensitive: [
     "sensitive personal information",
@@ -317,8 +331,16 @@ const EVIDENCE_KEYWORDS_BY_CATEGORY = {
   contacts_content: ["contacts", "messages", "photos", "files", "uploads"],
 };
 
+function getEvidenceTextValue(text = "") {
+  if (text && typeof text === "object") {
+    return text.text || text.quote || text.evidence || "";
+  }
+
+  return text;
+}
+
 function normalizeEvidenceText(text = "") {
-  return String(text || "").replace(/\s+/g, " ").trim();
+  return String(getEvidenceTextValue(text) || "").replace(/\s+/g, " ").trim();
 }
 
 function getEvidenceKeywords(item = {}) {
@@ -336,31 +358,71 @@ function getEvidenceSignal(text = "", item = {}) {
   return keywords.find((word) => lower.includes(word.toLowerCase())) || "";
 }
 
-function createEvidenceSnippet(text = "", item = {}, maxLen = 96) {
+function createEvidenceSnippet(text = "", item = {}) {
+  const clean = normalizeEvidenceText(text);
+  return clean;
+}
+
+function trimTextFragmentStart(text = "") {
+  const clean = normalizeEvidenceText(text);
+  const firstSpace = clean.indexOf(" ");
+  return firstSpace > 0 ? clean.slice(firstSpace + 1).trim() : clean;
+}
+
+function trimTextFragmentEnd(text = "") {
+  const clean = normalizeEvidenceText(text);
+  const lastSpace = clean.lastIndexOf(" ");
+  return lastSpace > 0 ? clean.slice(0, lastSpace).trim() : clean;
+}
+
+function getTextFragmentDirective(text = "") {
   const clean = normalizeEvidenceText(text);
   if (!clean) return "";
-  if (clean.length <= maxLen) return clean;
 
-  const lower = clean.toLowerCase();
-  const signal = getEvidenceSignal(clean, item);
-  const matchIndex = signal ? lower.indexOf(signal.toLowerCase()) : -1;
-
-  const center = matchIndex >= 0 ? matchIndex : 0;
-  const start = Math.max(0, center - 32);
-  const end = Math.min(clean.length, start + maxLen);
-  let snippet = clean.slice(start, end).trim();
-
-  const firstSpace = snippet.indexOf(" ");
-  if (start > 0 && firstSpace > 0) {
-    snippet = snippet.slice(firstSpace + 1);
+  if (clean.length <= 260) {
+    return encodeURIComponent(clean);
   }
 
-  const lastSpace = snippet.lastIndexOf(" ");
-  if (end < clean.length && lastSpace > 60) {
-    snippet = snippet.slice(0, lastSpace);
+  const start = trimTextFragmentEnd(clean.slice(0, 150));
+  const end = trimTextFragmentStart(clean.slice(-120));
+
+  if (!start || !end || start === end) {
+    return encodeURIComponent(start || clean.slice(0, 260));
   }
 
-  return `${start > 0 ? "..." : ""}${snippet}${end < clean.length ? "..." : ""}`;
+  return `${encodeURIComponent(start)},${encodeURIComponent(end)}`;
+}
+
+function buildPolicyTextFragmentUrl(baseUrl = "", evidenceText = "") {
+  const directive = getTextFragmentDirective(evidenceText);
+  if (!baseUrl || !directive) return "";
+
+  try {
+    const url = new URL(baseUrl);
+    url.hash = "";
+    return `${url.toString()}#:~:text=${directive}`;
+  } catch {
+    return "";
+  }
+}
+
+function openPolicyEvidence(baseUrl = "", evidenceText = "") {
+  const targetUrl = buildPolicyTextFragmentUrl(baseUrl, evidenceText);
+  const quote = normalizeEvidenceText(evidenceText);
+  if (!targetUrl || !quote) return;
+
+  chrome.runtime.sendMessage(
+    {
+      type: "OPEN_POLICY_EVIDENCE",
+      url: targetUrl,
+      quote,
+    },
+    (response) => {
+      if (!response?.ok) {
+        chrome.tabs.create({ url: targetUrl });
+      }
+    }
+  );
 }
 
 function appendHighlightedEvidence(line, snippet, signal = "") {
@@ -395,9 +457,22 @@ function formatEvidenceSection(item = {}) {
   return map[String(section || "").toLowerCase()] || "Policy";
 }
 
-function appendEvidenceCard(parent, evidenceText, item) {
+function getEvidenceDisplayLabel(item = {}, evidenceText = "", index = 0) {
+  if (Array.isArray(item.evidenceLabels) && item.evidenceLabels[index]) {
+    return item.evidenceLabels[index];
+  }
+
+  const signal = getEvidenceSignal(evidenceText, item);
+  if (signal) return signal;
+
+  return formatEvidenceSection(item);
+}
+
+function appendEvidenceCard(parent, evidenceText, item, index = 0) {
   const signal = getEvidenceSignal(evidenceText, item);
   const snippet = createEvidenceSnippet(evidenceText, item);
+  const policyUrl = item?.policyUrl || "";
+  const targetUrl = buildPolicyTextFragmentUrl(policyUrl, snippet);
 
   const card = document.createElement("div");
   card.className = "evidence-card";
@@ -407,10 +482,10 @@ function appendEvidenceCard(parent, evidenceText, item) {
 
   const section = document.createElement("span");
   section.className = "evidence-chip";
-  section.textContent = formatEvidenceSection(item);
+  section.textContent = getEvidenceDisplayLabel(item, evidenceText, index);
   meta.appendChild(section);
 
-  if (signal) {
+  if (signal && signal.toLowerCase() !== section.textContent.toLowerCase()) {
     const signalEl = document.createElement("span");
     signalEl.className = "evidence-signal";
     signalEl.textContent = signal;
@@ -420,6 +495,19 @@ function appendEvidenceCard(parent, evidenceText, item) {
   const quote = document.createElement("div");
   quote.className = "finding-evidence-line";
   appendHighlightedEvidence(quote, snippet, signal);
+
+  if (targetUrl) {
+    quote.classList.add("finding-evidence-link");
+    quote.setAttribute("role", "link");
+    quote.setAttribute("tabindex", "0");
+    quote.title = "Open this passage in the analyzed privacy policy";
+    quote.addEventListener("click", () => openPolicyEvidence(policyUrl, snippet));
+    quote.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openPolicyEvidence(policyUrl, snippet);
+    });
+  }
 
   card.appendChild(meta);
   card.appendChild(quote);
@@ -440,9 +528,9 @@ function appendEvidenceToggle(parent, item) {
   const evidenceBox = document.createElement("div");
   evidenceBox.className = "finding-evidence hidden";
 
-  for (const ev of item.evidence.slice(0, 2)) {
-    appendEvidenceCard(evidenceBox, ev, item);
-  }
+  item.evidence.slice(0, 2).forEach((ev, index) => {
+    appendEvidenceCard(evidenceBox, ev, item, index);
+  });
 
   evidenceToggle.addEventListener("click", () => {
     const isHidden = evidenceBox.classList.contains("hidden");
@@ -494,7 +582,7 @@ function renderFindings(findingsEl, findings = [], options = {}) {
     if (item.severity) {
       const badge = document.createElement("span");
       badge.className = "finding-impact-badge";
-      setSeverityBadgeIcon(badge, item.severity);
+      setSeverityBadgeLabel(badge, item.severity);
       top.appendChild(badge);
     }
 
@@ -503,13 +591,8 @@ function renderFindings(findingsEl, findings = [], options = {}) {
 
     const metaParts = [];
     if (item.confidence) metaParts.push(formatConfidence(item.confidence));
-    if (item.category) {
-      metaParts.push(
-        String(item.category)
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (char) => char.toUpperCase())
-      );
-    }
+    const riskLabel = getFindingRiskLabel(item);
+    if (riskLabel) metaParts.push(riskLabel);
     meta.textContent = metaParts.join(" • ");
 
     const summary = document.createElement("div");
@@ -646,20 +729,15 @@ function renderReasonList(listEl, findings = [], options = {}) {
 
     const badge = document.createElement("span");
     badge.className = "quick-reason-badge";
-    setSeverityBadgeIcon(badge, item.severity);
+    setSeverityBadgeLabel(badge, item.severity);
     top.appendChild(badge);
 
     card.appendChild(top);
 
     const metaParts = [];
     if (item.confidence) metaParts.push(formatConfidence(item.confidence));
-    if (item.category) {
-      metaParts.push(
-        String(item.category)
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (char) => char.toUpperCase())
-      );
-    }
+    const riskLabel = getFindingRiskLabel(item);
+    if (riskLabel) metaParts.push(riskLabel);
 
     if (metaParts.length) {
       const meta = document.createElement("div");
@@ -681,12 +759,35 @@ function renderReasonList(listEl, findings = [], options = {}) {
 }
 
 function setPolicyLinkUI(heuristicLink, heuristicOpen, link) {
+  const linkRow = document.getElementById("policy-source-link-row");
+  const toggle = document.getElementById("policy-source-toggle");
+  const hasLink = !!link;
+
+  if (linkRow) {
+    linkRow.style.display = "none";
+  }
+
+  if (toggle) {
+    toggle.hidden = !hasLink;
+    toggle.textContent = "Show policy link";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.onclick = () => {
+      if (!linkRow) return;
+
+      const shouldShow = linkRow.style.display === "none";
+      linkRow.style.display = shouldShow ? "" : "none";
+      toggle.textContent = shouldShow ? "Hide policy link" : "Show policy link";
+      toggle.setAttribute("aria-expanded", shouldShow ? "true" : "false");
+    };
+  }
+
   if (heuristicLink) {
     heuristicLink.textContent = link || "No policy link found";
+    heuristicLink.title = link || "";
   }
 
   if (heuristicOpen) {
-    heuristicOpen.disabled = !link;
+    heuristicOpen.disabled = !hasLink;
     heuristicOpen.onclick = () => {
       if (link) chrome.tabs.create({ url: link });
     };
@@ -756,7 +857,11 @@ function renderHeuristic(els, r) {
     return;
   }
 
-  const findings = getFindingsArray(r.findings);
+  const policyDisplayUrl = getPolicyDisplayUrl(r);
+  const findings = getFindingsArray(r.findings).map((finding) => ({
+    ...finding,
+    policyUrl: policyDisplayUrl,
+  }));
   const countedRisks = getCountedRisks(findings);
   const riskStats = getRiskStats(findings);
   const sourceState = getSourceState(r);
@@ -792,7 +897,7 @@ function renderHeuristic(els, r) {
   }
 
   if (heuristicScore) {
-      heuristicScore.className = "status-text";
+    heuristicScore.className = "status-text";
 
     if (riskStats.high > 0) {
       heuristicScore.classList.add("status-red");
@@ -836,7 +941,7 @@ function renderHeuristic(els, r) {
     limit: 6,
   });
 
-  setPolicyLinkUI(heuristicLink, heuristicOpen, getPolicyDisplayUrl(r));
+  setPolicyLinkUI(heuristicLink, heuristicOpen, policyDisplayUrl);
 }
 
 function renderMismatch(mismatch) {
@@ -892,6 +997,30 @@ function getTrackerSeverityClass(confidence = "") {
   if (c === "high") return "tracker-high";
   if (c === "medium") return "tracker-medium";
   return "tracker-low";
+}
+
+function formatTrackerImpact(level = "") {
+  const c = String(level || "").toLowerCase();
+  if (c === "high") return "High-impact";
+  if (c === "medium") return "Medium-impact";
+  return "Low-impact";
+}
+
+function trackerSeverityRank(value = "") {
+  const severity = String(value || "").toLowerCase();
+  if (severity === "high") return 3;
+  if (severity === "medium") return 2;
+  if (severity === "low") return 1;
+  return 0;
+}
+
+function highestTrackerSeverity(items = [], fallback = "low") {
+  return items.reduce((highest, item) => {
+    const severity = item?.severity || item?.riskLevel || item?.confidence || "low";
+    return trackerSeverityRank(severity) > trackerSeverityRank(highest)
+      ? severity
+      : highest;
+  }, fallback);
 }
 
 function appendTrackerItem(parent, {
@@ -983,10 +1112,21 @@ function renderTrackerSignals(trackerSignals = null) {
     : Array.isArray(trackerSignals?.thirdPartyResources)
       ? trackerSignals.thirdPartyResources
       : [];
+  const vendorSummaries = Array.isArray(groups.vendors)
+    ? groups.vendors
+    : Array.isArray(trackerSignals?.summary?.vendors)
+      ? trackerSignals.summary.vendors
+      : [];
   const vendorNames = Array.isArray(trackerSignals?.summary?.topVendors)
     ? trackerSignals.summary.topVendors
-    : [...new Set(trackerHits.map((hit) => hit.vendor).filter(Boolean))];
+    : vendorSummaries.length
+      ? vendorSummaries.map((item) => item.vendor).filter(Boolean)
+      : [...new Set(trackerHits.map((hit) => hit.vendor).filter(Boolean))];
   const vendorCount = counts.vendors ?? vendorNames.length;
+  const meaningfulThirdPartyCount =
+    counts.meaningfulThirdParty ??
+    trackerSignals?.summary?.thirdPartyProfile?.meaningful ??
+    thirdPartyResources.filter((resource) => resource?.likelyBenign !== true).length;
 
   const totalSignals =
     (counts.knownTrackers ?? trackerHits.length) +
@@ -994,7 +1134,7 @@ function renderTrackerSignals(trackerSignals = null) {
     (counts.forms ?? formSignals.length) +
     (counts.fingerprinting ?? fingerprintingHints.length);
 
-  if (totalSignals === 0 && thirdPartyResources.length < 6) {
+  if (totalSignals === 0 && meaningfulThirdPartyCount < 6) {
     details.style.display = "none";
     summary.className = `summary-box tracker-summary ${getTrackerSeverityClass("low")}`;
     summary.textContent = "No tracker signals detected.";
@@ -1004,10 +1144,23 @@ function renderTrackerSignals(trackerSignals = null) {
   details.style.display = "";
 
   const confidence = trackerSignals?.summary?.confidence || trackerSignals?.confidence || "low";
-  summary.className = `summary-box tracker-summary ${getTrackerSeverityClass(confidence)}`;
-  summary.textContent = vendorCount
-    ? `${formatConfidence(confidence)} tracker evidence from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
-    : `${formatConfidence(confidence)} tracker evidence detected.`;
+  const riskLevel = trackerSignals?.summary?.riskLevel || trackerSignals?.riskLevel || confidence;
+  const routineOnly = trackerSignals?.summary?.routineOnly === true;
+  const highImpactCount = counts.highImpact ?? 0;
+  summary.className = `summary-box tracker-summary ${getTrackerSeverityClass(riskLevel)}`;
+  if (routineOnly) {
+    summary.textContent = vendorCount
+      ? `Routine commerce tracker signals from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
+      : "Routine commerce tracker signals detected.";
+  } else if (highImpactCount > 0) {
+    summary.textContent = vendorCount
+      ? `${formatTrackerImpact(riskLevel)} tracker evidence from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
+      : `${formatTrackerImpact(riskLevel)} tracker evidence detected.`;
+  } else {
+    summary.textContent = vendorCount
+      ? `${formatTrackerImpact(riskLevel)} tracker evidence from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
+      : `${formatTrackerImpact(riskLevel)} tracker evidence detected.`;
+  }
 
   if (vendorNames.length) {
     const sources = [
@@ -1021,14 +1174,24 @@ function renderTrackerSignals(trackerSignals = null) {
       ...new Set(trackerHits.map((hit) => hit.purpose).filter(Boolean)),
     ];
 
+    const routineVendors =
+      vendorSummaries.length > 0 &&
+      vendorSummaries.every((vendor) => vendor?.routineCommerce === true);
+    const vendorSeverity = highestTrackerSeverity(
+      vendorSummaries.length ? vendorSummaries : trackerHits,
+      riskLevel
+    );
+
     appendTrackerItem(list, {
       title: "Known tracker services",
-      summary: purposes.length
-        ? `Used for ${purposes.slice(0, 3).join(", ")}.`
-        : "Known analytics or advertising services were detected.",
-      count: `${trackerHits.length}`,
+      summary: routineVendors
+        ? `Common commerce analytics, tag, or ad-conversion services were detected across ${trackerHits.length} request${trackerHits.length === 1 ? "" : "s"}.`
+        : purposes.length
+        ? `Used for ${purposes.slice(0, 3).join(", ")} across ${trackerHits.length} request${trackerHits.length === 1 ? "" : "s"}.`
+        : `Known analytics or advertising services were detected across ${trackerHits.length} request${trackerHits.length === 1 ? "" : "s"}.`,
+      count: `${vendorCount}`,
       chips: [...vendorNames.slice(0, 4), ...sources.slice(0, 2)],
-      severity: confidence,
+      severity: vendorSeverity,
     });
   }
 
@@ -1044,13 +1207,16 @@ function renderTrackerSignals(trackerSignals = null) {
 
   if (storageSignals.length) {
     const labels = [...new Set(storageSignals.map((signal) => signal.label).filter(Boolean))];
-    const highestStorageSeverity = storageSignals.some((signal) => signal.severity === "high")
-      ? "high"
-      : "medium";
+    const highestStorageSeverity = highestTrackerSeverity(storageSignals, "low");
+    const routineStorage = storageSignals.every(
+      (signal) => signal?.routineCommerce === true
+    );
 
     appendTrackerItem(list, {
       title: "Browser storage signals",
-      summary: "Tracking-style identifiers were found in browser storage.",
+      summary: routineStorage
+        ? "Routine ad attribution, analytics, or session identifiers were found in browser storage."
+        : "Tracking-style identifiers were found in browser storage.",
       count: `${storageSignals.length}`,
       chips: labels.slice(0, 5),
       severity: highestStorageSeverity,
@@ -1059,32 +1225,42 @@ function renderTrackerSignals(trackerSignals = null) {
 
   if (formSignals.length) {
     const labels = [...new Set(formSignals.map((signal) => signal.label).filter(Boolean))];
-    const highestFormSeverity = formSignals.some((signal) => signal.severity === "high")
-      ? "high"
-      : "medium";
+    const highestFormSeverity = highestTrackerSeverity(formSignals, "low");
+    const routineForms = formSignals.every(
+      (signal) => signal?.routineCommerce === true
+    );
 
     appendTrackerItem(list, {
       title: "Data-entry fields",
-      summary: "The page asks for information that can identify a visitor.",
+      summary: routineForms
+        ? "Checkout, account, or order fields were detected; these are not tracker behavior by themselves."
+        : "The page asks for information that can identify a visitor.",
       count: `${formSignals.length}`,
       chips: labels.slice(0, 5),
       severity: highestFormSeverity,
     });
   }
 
-  if (!trackerHits.length && thirdPartyResources.length >= 6) {
-    const hosts = [...new Set(thirdPartyResources.map((item) => item.hostname).filter(Boolean))];
+  if (!trackerHits.length && meaningfulThirdPartyCount >= 6) {
+    const hosts = [
+      ...new Set(
+        thirdPartyResources
+          .filter((item) => item?.likelyBenign !== true)
+          .map((item) => item.hostname)
+          .filter(Boolean)
+      ),
+    ];
     appendTrackerItem(list, {
       title: "Third-party resources",
       summary: "Several outside domains loaded resources on this page.",
-      count: `${thirdPartyResources.length}`,
+      count: `${meaningfulThirdPartyCount}`,
       chips: hosts.slice(0, 5),
       severity: "medium",
     });
   }
 }
 
-async function loadHeuristicIntoPopup(els) {
+async function loadHeuristicIntoPopup(els, { force = false } = {}) {
   const tab = await getActiveTab();
   if (!tab?.id) {
     renderHeuristic(els, null);
@@ -1094,7 +1270,12 @@ async function loadHeuristicIntoPopup(els) {
 
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(
-      { type: "getHeuristic", tabId: tab.id },
+      {
+        type: "getHeuristic",
+        tabId: tab.id,
+        force,
+        repaintToolbar: true,
+      },
       (res) => {
         const r = res?.result || null;
         renderHeuristic(els, r);
@@ -1228,7 +1409,9 @@ async function init() {
 
   if (heuristicRefreshBtn) {
     heuristicRefreshBtn.addEventListener("click", async () => {
-      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
+      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls, {
+        force: true,
+      });
       showToast(toastContainer, "Policy check refreshed", "info");
     });
   }
@@ -1236,7 +1419,9 @@ async function init() {
   if (autoBtn) {
     autoBtn.textContent = "Refresh";
     autoBtn.addEventListener("click", async () => {
-      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
+      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls, {
+        force: true,
+      });
       showToast(toastContainer, "Summary refreshed", "info");
     });
   }

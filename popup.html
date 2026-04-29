@@ -30,63 +30,48 @@
     <div id="view-scan" class="popup-view active">
       <div id="policy-result-card" class="card">
         <div class="row-between">
-          <div class="section-title" style="margin-bottom: 0;">Policy Detector</div>
+          <div class="section-title flush">Policy Detector</div>
           <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
         </div>
 
-        <div style="height: 10px;"></div>
+        <div id="policy-finder-card" class="section-block">
+          <div class="section-label">Policy source</div>
+          <div class="summary-box policy-source-box">
+            <div id="policy-finder-status">
+              Analyzing policy source…
+            </div>
 
-        <div id="policy-finder-card">
-          <div class="small muted" style="margin-bottom: 6px;">Policy source</div>
-          <div id="policy-finder-status" class="summary-box">
-            Analyzing policy source…
+            <button id="policy-source-toggle" class="policy-source-toggle" type="button">
+              Show policy link
+            </button>
+
+            <div id="policy-source-link-row" class="policy-source-link-row">
+              <div class="policy-source-link-text">
+                <div class="small muted">Analyzed policy URL</div>
+                <div id="heuristic-link" class="policy-source-url">—</div>
+              </div>
+              <button id="heuristic-open" type="button" disabled>Open</button>
+            </div>
           </div>
         </div>
 
-        <div style="height: 10px;"></div>
-
-        <details>
-          <summary>
-            <span>Policy link</span>
-            <span class="summary-caret">Expand</span>
-          </summary>
-          <div class="details-content">
-            <div class="small muted" style="margin-bottom: 6px;">Analyzed policy URL</div>
-            <div id="heuristic-link" class="link-box">—</div>
-
-            <div style="height: 10px;"></div>
-
-            <div class="button-row">
-              <button id="heuristic-open" type="button" disabled>Open policy page</button>
-            </div>
-          </div>
-        </details>
-
-        <div style="height: 10px;"></div>
-
-        <div id="policy-summary-card">
-          <div class="small muted" style="margin-bottom: 6px;">Policy result</div>
+        <div id="policy-summary-card" class="section-block">
+          <div class="section-label">Policy result</div>
           <div id="heuristic-score" class="status-text status-blue">
             Refresh the page to analyze the site policy.
           </div>
 
           <div id="heuristic-summary-wrap">
-            <div style="height: 10px;"></div>
-
             <div id="heuristic-summary" class="summary-box">
               No policy analysis yet.
             </div>
           </div>
         </div>
 
-        <div style="height: 12px;"></div>
-
-        <div id="quick-reasons-section">
-          <div class="small muted" style="margin-bottom: 6px;">Key policy highlights</div>
+        <div id="quick-reasons-section" class="section-block">
+          <div class="section-label">Key policy highlights</div>
           <div id="heuristic-reasons" class="quick-reasons"></div>
         </div>
-
-        <div style="height: 12px;"></div>
 
       </div>
 
@@ -111,7 +96,7 @@
           <div id="tracker-summary" class="summary-box">
             No tracker signals detected.
           </div>
-          <div id="tracker-list" class="tracker-list" style="margin-top: 10px;"></div>
+          <div id="tracker-list" class="tracker-list"></div>
         </div>
       </details>
 
@@ -120,10 +105,10 @@
         <div id="mismatch-status" class="status-text status-blue">
           No mismatch analysis yet.
         </div>
-        <div id="mismatch-summary" class="summary-box" style="margin-top: 10px;">
+        <div id="mismatch-summary" class="summary-box stacked">
           Open a page and refresh the extension.
         </div>
-        <ul id="mismatch-list" class="clean-list" style="margin-top: 10px;"></ul>
+        <ul id="mismatch-list" class="clean-list stacked"></ul>
       </div>
 
       <details>
@@ -149,12 +134,10 @@
           Choose what to block on this site. These controls are manual and do not depend on the policy detector.
         </div>
 
-        <div style="height: 12px;"></div>
-
-        <div class="small muted" style="margin-bottom: 6px;">Current site</div>
-        <div id="protect-site-label" class="link-box">Loading current site…</div>
-
-        <div style="height: 14px;"></div>
+        <div class="section-block">
+          <div class="section-label">Current site</div>
+          <div id="protect-site-label" class="link-box">Loading current site…</div>
+        </div>
 
         <label class="protect-option">
           <input type="checkbox" id="protect-block-trackers" />
@@ -196,14 +179,12 @@
           </div>
         </label>
 
-        <div style="height: 14px;"></div>
-
-        <div class="button-row">
+        <div class="button-row section-block">
           <button id="protect-save" class="primary" type="button">Save for this site</button>
           <button id="protect-reset" type="button">Reset</button>
         </div>
 
-        <div id="protect-status" class="status-text status-blue" style="margin-top: 12px;">
+        <div id="protect-status" class="status-text status-blue stacked">
           No protection settings saved yet.
         </div>
       </div>
