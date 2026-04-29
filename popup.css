@@ -858,6 +858,26 @@ ul.clean-list li {
   word-break: break-word;
 }
 
+.tracker-item-why {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(122, 162, 255, 0.07);
+  border: 1px solid rgba(122, 162, 255, 0.14);
+}
+
+.tracker-protection-note {
+  color: var(--theme-pill-text);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(var(--theme-rgb), 0.08);
+  border: 1px solid rgba(var(--theme-rgb), 0.18);
+}
+
 .tracker-chip-row {
   display: flex;
   flex-wrap: wrap;

@@ -137,6 +137,129 @@ test("medium tracker detector risk can surface even when no policy link is found
   assert.equal(result.summary, "Tracking signals detected");
 });
 
+test("protection activity can lower behavior-only tracker score", () => {
+  const heuristic = normalizeHeuristicResult({
+    isLikelyPolicyPage: false,
+    pageScore: 0,
+    score: 0,
+    pageConfidence: "Low",
+    pageType: "normal",
+    bestPolicyLink: "",
+    bestLinkScore: 0,
+    findings: [],
+    trackerSignals: {
+      riskScore: 60,
+      riskLevel: "high",
+      confidence: "high",
+      trackerHits: [
+        {
+          id: "doubleclick",
+          vendor: "DoubleClick",
+          hostname: "doubleclick.net",
+          category: "sharing",
+          severity: "high",
+          confidence: "high",
+        },
+      ],
+      summary: {
+        riskScore: 60,
+        riskLevel: "high",
+        routineOnly: false,
+      },
+    },
+  });
+
+  const unprotected = computeFromHeuristic(heuristic);
+  const protectedResult = computeFromHeuristic({
+    ...heuristic,
+    protectionActivity: {
+      items: [
+        {
+          kind: "known-tracker",
+          trackerId: "doubleclick",
+          vendor: "DoubleClick",
+          hostname: "doubleclick.net",
+          count: 1,
+        },
+      ],
+    },
+  });
+
+  assert.equal(scoreToLevel(unprotected.score), "yellow");
+  assert.equal(scoreToLevel(protectedResult.score), "blue");
+  assert.ok(protectedResult.score < unprotected.score);
+});
+
+test("protection lowers only the tracker portion of a policy score", () => {
+  const heuristic = normalizeHeuristicResult({
+    isLikelyPolicyPage: true,
+    pageScore: 28,
+    score: 28,
+    pageConfidence: "High",
+    pageType: "privacy_policy",
+    bestPolicyLink: "https://example.com/privacy",
+    bestLinkScore: 22,
+    findings: [
+      {
+        category: "sale",
+        title: "May sell personal information",
+        confidence: "explicit",
+        severity: "high",
+        score: 28,
+        evidence: ["We may sell your personal information."],
+      },
+      {
+        category: "sensitive",
+        title: "Collects sensitive personal data",
+        confidence: "explicit",
+        severity: "high",
+        score: 26,
+        evidence: ["We may collect sensitive personal information."],
+      },
+    ],
+    trackerSignals: {
+      riskScore: 60,
+      riskLevel: "high",
+      confidence: "high",
+      trackerHits: [
+        {
+          id: "doubleclick",
+          vendor: "DoubleClick",
+          hostname: "doubleclick.net",
+          category: "sharing",
+          severity: "high",
+          confidence: "high",
+        },
+      ],
+      summary: {
+        riskScore: 60,
+        riskLevel: "high",
+        routineOnly: false,
+      },
+    },
+  });
+
+  const unprotected = computeFromHeuristic(heuristic);
+  const protectedResult = computeFromHeuristic({
+    ...heuristic,
+    protectionActivity: {
+      items: [
+        {
+          kind: "known-tracker",
+          trackerId: "doubleclick",
+          vendor: "DoubleClick",
+          hostname: "doubleclick.net",
+          count: 1,
+        },
+      ],
+    },
+  });
+
+  assert.equal(scoreToLevel(unprotected.score), "red");
+  assert.equal(scoreToLevel(protectedResult.score), "yellow");
+  assert.equal(protectedResult.issuesCount, unprotected.issuesCount);
+});
+
 test("policy-like pages with plausible risks produce a non-zero score", () => {
   const heuristic = normalizeHeuristicResult({
     isLikelyPolicyPage: true,
