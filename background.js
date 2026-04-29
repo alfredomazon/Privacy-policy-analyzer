@@ -2,8 +2,10 @@ import { setTabCache, getTabCache, clearTabCache } from "./lib/cache.js";
 import {
   normalizeHeuristicResult,
   computeFromHeuristic,
+  scoreToLevel,
 } from "./lib/finalScore.js";
 import { setToolbar, setScanningState } from "./lib/iconManager.js";
+import { classifyTrackerUrl } from "./lib/trackerRegistry.js";
 
 const TOGGLE_KEY = "gpt5Enabled";
 const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
@@ -23,6 +25,8 @@ const DEFAULT_MANUAL_RULES = {
 const TOOLBAR_STATE_BY_TAB = new Map();
 const LAST_URL_BY_TAB = new Map();
 const SCANNING_TABS = new Set();
+const NETWORK_TRACKER_SIGNALS_BY_TAB = new Map();
+const MAX_NETWORK_TRACKER_SIGNALS = 80;
 
 function sameToolbarState(a, b) {
   if (a === b) return true;
@@ -40,9 +44,19 @@ function safeComputeToolbarState(result) {
   try {
     const normalized = normalizeHeuristicResult(result);
     const computed = computeFromHeuristic(normalized);
+    const toolbarLevel = scoreToLevel(computed.score);
 
     return {
-      normalized,
+      normalized:
+        normalized && typeof normalized === "object"
+          ? {
+              ...normalized,
+              toolbarState: {
+                ...computed,
+                level: toolbarLevel,
+              },
+            }
+          : normalized,
       computed,
     };
   } catch (err) {
@@ -81,6 +95,7 @@ function resetTabState(tabId) {
   TOOLBAR_STATE_BY_TAB.delete(tabId);
   LAST_URL_BY_TAB.delete(tabId);
   SCANNING_TABS.delete(tabId);
+  clearNetworkTrackerSignals(tabId);
 }
 
 async function setScanningForTab(tabId) {
@@ -113,6 +128,46 @@ function getHostnameFromUrl(url) {
   } catch {
     return "";
   }
+}
+
+function getNetworkTrackerSignals(tabId) {
+  return NETWORK_TRACKER_SIGNALS_BY_TAB.get(tabId) || [];
+}
+
+function clearNetworkTrackerSignals(tabId) {
+  NETWORK_TRACKER_SIGNALS_BY_TAB.delete(tabId);
+}
+
+function getNetworkSignalKey(signal) {
+  return [
+    signal.id || signal.vendor || "",
+    signal.sourceType || "",
+    signal.requestType || "",
+    signal.hostname || "",
+    signal.url || "",
+  ].join("|");
+}
+
+function rememberNetworkTrackerSignal(tabId, signal) {
+  if (tabId == null || tabId < 0 || !signal) return;
+
+  const current = NETWORK_TRACKER_SIGNALS_BY_TAB.get(tabId) || [];
+  const nextKey = getNetworkSignalKey(signal);
+
+  if (current.some((item) => getNetworkSignalKey(item) === nextKey)) {
+    return;
+  }
+
+  const next = [
+    ...current,
+    {
+      ...signal,
+      sourceType: signal.sourceType || "network",
+      observedAt: Date.now(),
+    },
+  ].slice(-MAX_NETWORK_TRACKER_SIGNALS);
+
+  NETWORK_TRACKER_SIGNALS_BY_TAB.set(tabId, next);
 }
 
 async function getAllManualSiteRules() {
@@ -188,6 +243,62 @@ async function callAnalyzeServer(text, token) {
   }
 }
 
+async function fetchLinkedPolicyDocument(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "omit",
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `HTTP ${response.status}`,
+      };
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) {
+      return {
+        ok: false,
+        error: "not_html",
+      };
+    }
+
+    const html = await response.text();
+    if (!html) {
+      return {
+        ok: false,
+        error: "empty_html",
+      };
+    }
+
+    return {
+      ok: true,
+      url: response.url || url,
+      html,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        err?.name === "AbortError"
+          ? "timeout"
+          : err?.message || String(err),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function shouldResetForNavigation(tabId, info) {
   if (!info.url) return false;
 
@@ -213,6 +324,7 @@ function handleTabLoading(tabId, info) {
   if (shouldResetForNavigation(tabId, info)) {
     clearTabCache(tabId);
     TOOLBAR_STATE_BY_TAB.delete(tabId);
+    clearNetworkTrackerSignals(tabId);
   }
 }
 
@@ -236,6 +348,35 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   resetTabState(tabId);
 });
+
+if (chrome.webRequest?.onBeforeRequest) {
+  chrome.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.tabId == null || details.tabId < 0) return;
+      if (details.type === "main_frame") return;
+
+      const pageUrl =
+        LAST_URL_BY_TAB.get(details.tabId) ||
+        details.documentUrl ||
+        details.initiator ||
+        "";
+      const pageHostname = getHostnameFromUrl(pageUrl);
+      if (!pageHostname) return;
+
+      const signal = classifyTrackerUrl({
+        url: details.url,
+        pageHostname,
+        sourceType: "network",
+        requestType: details.type || "",
+      });
+
+      if (signal) {
+        rememberNetworkTrackerSignal(details.tabId, signal);
+      }
+    },
+    { urls: ["<all_urls>"] }
+  );
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get([TOGGLE_KEY], (res) => {
@@ -297,6 +438,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
 
     return true;
+  }
+
+  if (msg.type === "GET_TRACKER_NETWORK_SIGNALS") {
+    const tabId = sender.tab?.id ?? msg.tabId;
+
+    sendResponse({
+      ok: true,
+      signals: tabId == null ? [] : getNetworkTrackerSignals(tabId),
+    });
+    return false;
   }
 
   if (msg.type === "getStatus") {
@@ -443,6 +594,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             err?.name === "AbortError"
               ? "Analysis request timed out."
               : err?.message || String(err),
+        });
+      }
+    })();
+
+    return true;
+  }
+
+  if (msg.type === "FETCH_LINKED_POLICY_DOCUMENT") {
+    (async () => {
+      try {
+        const url = typeof msg.url === "string" ? msg.url.trim() : "";
+
+        if (!url) {
+          sendResponse({
+            ok: false,
+            error: "Missing URL.",
+          });
+          return;
+        }
+
+        const result = await fetchLinkedPolicyDocument(url);
+        sendResponse(result);
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err?.message || String(err),
         });
       }
     })();

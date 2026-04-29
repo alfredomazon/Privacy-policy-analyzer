@@ -27,6 +27,7 @@
     "activeTab",
     "scripting",
     "tabs",
+    "webRequest",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess"
   ],

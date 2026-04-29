@@ -106,6 +106,40 @@ function getRiskStats(findings = []) {
   };
 }
 
+function getThemeFromToolbarScore(score = 0) {
+  const numeric = Number(score);
+  if (!Number.isFinite(numeric)) return "blue";
+  if (numeric >= 70) return "red";
+  if (numeric >= 35) return "yellow";
+  return "blue";
+}
+
+function getPopupRiskTheme(result = {}) {
+  const toolbarLevel = String(result?.toolbarState?.level || "").toLowerCase();
+  if (["red", "yellow", "blue"].includes(toolbarLevel)) return toolbarLevel;
+
+  return getThemeFromToolbarScore(result?.toolbarState?.score);
+}
+
+function getThemeIconPath(theme = "blue") {
+  if (theme === "red") return "icons/EvilEyeRed48.png";
+  if (theme === "yellow") return "icons/EvilEyeYellow48.png";
+  return "icons/EvilEye48.png";
+}
+
+function applyPopupRiskTheme(theme = "blue") {
+  const normalized = ["red", "yellow", "blue"].includes(theme)
+    ? theme
+    : "blue";
+
+  document.body.dataset.riskTheme = normalized;
+
+  const brandEye = document.getElementById("brand-eye");
+  if (brandEye) {
+    brandEye.src = getThemeIconPath(normalized);
+  }
+}
+
 function hasDetectedCategories(dataCollected = {}) {
   return Object.values(dataCollected || {}).some(Boolean);
 }
@@ -129,6 +163,14 @@ function getSourceState(result) {
     };
   }
 
+  if (sourceType === "known-domain") {
+    return {
+      type: "known-domain",
+      isPolicyLikeSource: true,
+      label: "Known domain privacy policy",
+    };
+  }
+
   return {
     type: "page-fallback",
     isPolicyLikeSource: false,
@@ -144,12 +186,275 @@ function getShortText(item) {
   );
 }
 
-function sortByShortestText(items = []) {
+function severityRank(value = "") {
+  const severity = String(value || "").toLowerCase();
+  if (severity === "high") return 3;
+  if (severity === "medium") return 2;
+  if (severity === "low") return 1;
+  return 0;
+}
+
+function confidenceRank(value = "") {
+  const confidence = String(value || "").toLowerCase();
+  if (confidence === "explicit") return 4;
+  if (confidence === "likely") return 3;
+  if (confidence === "medium") return 2;
+  if (confidence === "possible") return 1;
+  return 0;
+}
+
+function sortFindingsForDisplay(items = []) {
   return [...items].sort((a, b) => {
+    const severityDiff = severityRank(b?.severity) - severityRank(a?.severity);
+    if (severityDiff) return severityDiff;
+
+    const confidenceDiff = confidenceRank(b?.confidence) - confidenceRank(a?.confidence);
+    if (confidenceDiff) return confidenceDiff;
+
+    const scoreDiff = (b?.score || 0) - (a?.score || 0);
+    if (scoreDiff) return scoreDiff;
+
     const aText = getShortText(a);
     const bText = getShortText(b);
     return aText.length - bText.length;
   });
+}
+
+function getImmediateFindings(findings = [], limit = Infinity) {
+  const sorted = sortFindingsForDisplay(getCountedRisks(findings));
+  const highImpact = sorted.filter(
+    (item) => String(item?.severity || "").toLowerCase() === "high"
+  );
+
+  return highImpact.slice(0, limit);
+}
+
+function getSeverityIconPath(severity = "") {
+  const value = String(severity || "").toLowerCase();
+  if (value === "high") return "icons/EvilEyeRed32.png";
+  if (value === "medium") return "icons/EvilEyeYellow32.png";
+  return "icons/EvilEye32.png";
+}
+
+function setSeverityBadgeIcon(badge, severity = "") {
+  if (!badge) return;
+
+  const label = formatSeverity(severity) || "Impact";
+  badge.textContent = "";
+  badge.title = label;
+  badge.setAttribute("aria-label", label);
+
+  const icon = document.createElement("img");
+  icon.className = "impact-eye-icon";
+  icon.src = getSeverityIconPath(severity);
+  icon.alt = "";
+  icon.setAttribute("aria-hidden", "true");
+  badge.appendChild(icon);
+}
+
+const EVIDENCE_KEYWORDS_BY_CATEGORY = {
+  tracking: [
+    "targeted advertising",
+    "personalized ads",
+    "tracking technologies",
+    "cookies",
+    "analytics",
+    "pixels",
+    "beacons",
+  ],
+  sharing: [
+    "share",
+    "disclose",
+    "third parties",
+    "partners",
+    "vendors",
+    "affiliates",
+  ],
+  sale: [
+    "sell",
+    "sale",
+    "sold",
+    "valuable consideration",
+    "cross-context behavioral advertising",
+  ],
+  location: ["precise location", "geolocation", "gps", "location"],
+  financial: ["payment", "billing", "financial", "credit card", "bank"],
+  sensitive: [
+    "sensitive personal information",
+    "social security",
+    "health information",
+    "medical information",
+    "government id",
+    "driver's license",
+    "passport",
+    "precise geolocation",
+    "sensitive",
+    "health",
+    "medical",
+  ],
+  biometric: [
+    "biometric identifiers",
+    "biometric information",
+    "biometric",
+    "fingerprint",
+    "face geometry",
+    "voiceprint",
+    "retina",
+    "iris",
+  ],
+  identifiers: [
+    "personal information",
+    "identifying information",
+    "account information",
+    "ip address",
+    "email address",
+    "name",
+    "email",
+    "phone",
+    "address",
+  ],
+  device_network: ["device", "browser", "ip address", "user agent", "log data"],
+  contacts_content: ["contacts", "messages", "photos", "files", "uploads"],
+};
+
+function normalizeEvidenceText(text = "") {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function getEvidenceKeywords(item = {}) {
+  const category = String(item.category || "").toLowerCase();
+  return EVIDENCE_KEYWORDS_BY_CATEGORY[category] || [];
+}
+
+function getEvidenceSignal(text = "", item = {}) {
+  const clean = normalizeEvidenceText(text);
+  const lower = clean.toLowerCase();
+  const keywords = getEvidenceKeywords(item)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  return keywords.find((word) => lower.includes(word.toLowerCase())) || "";
+}
+
+function createEvidenceSnippet(text = "", item = {}, maxLen = 96) {
+  const clean = normalizeEvidenceText(text);
+  if (!clean) return "";
+  if (clean.length <= maxLen) return clean;
+
+  const lower = clean.toLowerCase();
+  const signal = getEvidenceSignal(clean, item);
+  const matchIndex = signal ? lower.indexOf(signal.toLowerCase()) : -1;
+
+  const center = matchIndex >= 0 ? matchIndex : 0;
+  const start = Math.max(0, center - 32);
+  const end = Math.min(clean.length, start + maxLen);
+  let snippet = clean.slice(start, end).trim();
+
+  const firstSpace = snippet.indexOf(" ");
+  if (start > 0 && firstSpace > 0) {
+    snippet = snippet.slice(firstSpace + 1);
+  }
+
+  const lastSpace = snippet.lastIndexOf(" ");
+  if (end < clean.length && lastSpace > 60) {
+    snippet = snippet.slice(0, lastSpace);
+  }
+
+  return `${start > 0 ? "..." : ""}${snippet}${end < clean.length ? "..." : ""}`;
+}
+
+function appendHighlightedEvidence(line, snippet, signal = "") {
+  const lower = snippet.toLowerCase();
+
+  if (!signal || !lower.includes(signal.toLowerCase())) {
+    line.textContent = snippet;
+    return;
+  }
+
+  const index = lower.indexOf(signal.toLowerCase());
+  line.append(document.createTextNode(snippet.slice(0, index)));
+
+  const mark = document.createElement("mark");
+  mark.textContent = snippet.slice(index, index + signal.length);
+  line.append(mark);
+
+  line.append(document.createTextNode(snippet.slice(index + signal.length)));
+}
+
+function formatEvidenceSection(item = {}) {
+  const section = item.section || (Array.isArray(item.sections) ? item.sections[0] : "");
+  const map = {
+    collection: "Collection",
+    use: "Use",
+    sharing: "Sharing",
+    tracking: "Tracking",
+    rights: "Rights",
+    general: "Policy",
+  };
+
+  return map[String(section || "").toLowerCase()] || "Policy";
+}
+
+function appendEvidenceCard(parent, evidenceText, item) {
+  const signal = getEvidenceSignal(evidenceText, item);
+  const snippet = createEvidenceSnippet(evidenceText, item);
+
+  const card = document.createElement("div");
+  card.className = "evidence-card";
+
+  const meta = document.createElement("div");
+  meta.className = "evidence-card-meta";
+
+  const section = document.createElement("span");
+  section.className = "evidence-chip";
+  section.textContent = formatEvidenceSection(item);
+  meta.appendChild(section);
+
+  if (signal) {
+    const signalEl = document.createElement("span");
+    signalEl.className = "evidence-signal";
+    signalEl.textContent = signal;
+    meta.appendChild(signalEl);
+  }
+
+  const quote = document.createElement("div");
+  quote.className = "finding-evidence-line";
+  appendHighlightedEvidence(quote, snippet, signal);
+
+  card.appendChild(meta);
+  card.appendChild(quote);
+  parent.appendChild(card);
+}
+
+function appendEvidenceToggle(parent, item) {
+  if (!parent || !Array.isArray(item?.evidence) || !item.evidence.length) return;
+
+  const evidenceWrap = document.createElement("div");
+  evidenceWrap.className = "finding-evidence-wrap";
+
+  const evidenceToggle = document.createElement("button");
+  evidenceToggle.type = "button";
+  evidenceToggle.className = "finding-evidence-toggle";
+  evidenceToggle.textContent = `Show quote${item.evidence.length > 1 ? "s" : ""}`;
+
+  const evidenceBox = document.createElement("div");
+  evidenceBox.className = "finding-evidence hidden";
+
+  for (const ev of item.evidence.slice(0, 2)) {
+    appendEvidenceCard(evidenceBox, ev, item);
+  }
+
+  evidenceToggle.addEventListener("click", () => {
+    const isHidden = evidenceBox.classList.contains("hidden");
+    evidenceBox.classList.toggle("hidden", !isHidden);
+    evidenceToggle.textContent = isHidden
+      ? "Hide quotes"
+      : `Show quote${item.evidence.length > 1 ? "s" : ""}`;
+  });
+
+  evidenceWrap.appendChild(evidenceToggle);
+  evidenceWrap.appendChild(evidenceBox);
+  parent.appendChild(evidenceWrap);
 }
 
 function renderFindings(findingsEl, findings = [], options = {}) {
@@ -161,7 +466,7 @@ function renderFindings(findingsEl, findings = [], options = {}) {
     limit = 6,
   } = options;
 
-  const list = sortByShortestText(getCountedRisks(findings)).slice(0, limit);
+  const list = sortFindingsForDisplay(getCountedRisks(findings)).slice(0, limit);
 
   if (!list.length) {
     const note = document.createElement("div");
@@ -174,58 +479,47 @@ function renderFindings(findingsEl, findings = [], options = {}) {
   for (const item of list) {
     const card = document.createElement("div");
     card.className = "finding-card";
+    const severity = String(item.severity || "").toLowerCase();
+    if (severity) {
+      card.classList.add(`finding-severity-${severity}`);
+    }
 
     const title = document.createElement("div");
     title.className = "finding-title";
     title.textContent = item.title || "Possible privacy concern";
+    const top = document.createElement("div");
+    top.className = "finding-card-top";
+    top.appendChild(title);
+
+    if (item.severity) {
+      const badge = document.createElement("span");
+      badge.className = "finding-impact-badge";
+      setSeverityBadgeIcon(badge, item.severity);
+      top.appendChild(badge);
+    }
 
     const meta = document.createElement("div");
     meta.className = "finding-meta";
 
     const metaParts = [];
     if (item.confidence) metaParts.push(formatConfidence(item.confidence));
-    if (item.severity) metaParts.push(formatSeverity(item.severity));
+    if (item.category) {
+      metaParts.push(
+        String(item.category)
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (char) => char.toUpperCase())
+      );
+    }
     meta.textContent = metaParts.join(" • ");
 
     const summary = document.createElement("div");
     summary.className = "finding-summary";
     summary.textContent = item.summary || "";
 
-    card.appendChild(title);
+    card.appendChild(top);
     if (meta.textContent) card.appendChild(meta);
     if (summary.textContent) card.appendChild(summary);
-
-    if (Array.isArray(item.evidence) && item.evidence.length) {
-      const evidenceWrap = document.createElement("div");
-      evidenceWrap.className = "finding-evidence-wrap";
-
-      const evidenceToggle = document.createElement("button");
-      evidenceToggle.type = "button";
-      evidenceToggle.className = "finding-evidence-toggle";
-      evidenceToggle.textContent = `Show evidence (${Math.min(item.evidence.length, 2)})`;
-
-      const evidenceBox = document.createElement("div");
-      evidenceBox.className = "finding-evidence hidden";
-
-      for (const ev of item.evidence.slice(0, 2)) {
-        const line = document.createElement("div");
-        line.className = "finding-evidence-line";
-        line.textContent = ev;
-        evidenceBox.appendChild(line);
-      }
-
-      evidenceToggle.addEventListener("click", () => {
-        const isHidden = evidenceBox.classList.contains("hidden");
-        evidenceBox.classList.toggle("hidden", !isHidden);
-        evidenceToggle.textContent = isHidden
-          ? "Hide evidence"
-          : `Show evidence (${Math.min(item.evidence.length, 2)})`;
-      });
-
-      evidenceWrap.appendChild(evidenceToggle);
-      evidenceWrap.appendChild(evidenceBox);
-      card.appendChild(evidenceWrap);
-    }
+    appendEvidenceToggle(card, item);
 
     findingsEl.appendChild(card);
   }
@@ -323,23 +617,66 @@ function renderReasonList(listEl, findings = [], options = {}) {
   listEl.innerHTML = "";
 
   const {
-    emptyMessage = "No major privacy concerns were clearly detected yet.",
-    limit = 3,
+    emptyMessage = "No immediate high-impact policy findings.",
+    limit = Infinity,
   } = options;
 
-  const list = sortByShortestText(getCountedRisks(findings)).slice(0, limit);
+  const list = getImmediateFindings(findings, limit);
 
   if (!list.length) {
-    const li = document.createElement("li");
-    li.textContent = emptyMessage;
-    listEl.appendChild(li);
+    const note = document.createElement("div");
+    note.className = "quick-reason-note";
+    note.textContent = emptyMessage;
+    listEl.appendChild(note);
     return;
   }
 
   for (const item of list) {
-    const li = document.createElement("li");
-    li.textContent = getShortText(item);
-    listEl.appendChild(li);
+    const severity = String(item.severity || "").toLowerCase();
+    const card = document.createElement("div");
+    card.className = `quick-reason quick-reason-${severity || "low"}`;
+
+    const top = document.createElement("div");
+    top.className = "quick-reason-top";
+
+    const title = document.createElement("div");
+    title.className = "quick-reason-title";
+    title.textContent = getShortText(item);
+    top.appendChild(title);
+
+    const badge = document.createElement("span");
+    badge.className = "quick-reason-badge";
+    setSeverityBadgeIcon(badge, item.severity);
+    top.appendChild(badge);
+
+    card.appendChild(top);
+
+    const metaParts = [];
+    if (item.confidence) metaParts.push(formatConfidence(item.confidence));
+    if (item.category) {
+      metaParts.push(
+        String(item.category)
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (char) => char.toUpperCase())
+      );
+    }
+
+    if (metaParts.length) {
+      const meta = document.createElement("div");
+      meta.className = "quick-reason-meta";
+      meta.textContent = metaParts.join(" • ");
+      card.appendChild(meta);
+    }
+
+    if (item.summary) {
+      const summary = document.createElement("div");
+      summary.className = "quick-reason-summary";
+      summary.textContent = item.summary;
+      card.appendChild(summary);
+    }
+
+    appendEvidenceToggle(card, item);
+    listEl.appendChild(card);
   }
 }
 
@@ -356,6 +693,18 @@ function setPolicyLinkUI(heuristicLink, heuristicOpen, link) {
   }
 }
 
+function getPolicyDisplayUrl(result) {
+  if (!result) return "";
+
+  const sourceType = String(result.policySourceType || "").toLowerCase();
+
+  if (sourceType === "page-fallback" && result.bestPolicyLink) {
+    return result.bestPolicyLink;
+  }
+
+  return result.analyzedPolicyUrl || result.bestPolicyLink || "";
+}
+
 function renderHeuristic(els, r) {
   const {
     resultCard,
@@ -367,9 +716,12 @@ function renderHeuristic(els, r) {
     dataChecklist,
     heuristicFindings,
     heuristicSummary,
+    heuristicSummaryWrap,
   } = els;
 
   if (!r) {
+    applyPopupRiskTheme("blue");
+
     if (resultCard) {
       resultCard.style.display = "";
       resultCard.hidden = false;
@@ -388,6 +740,10 @@ function renderHeuristic(els, r) {
       heuristicSummary.textContent = "No policy analysis yet.";
     }
 
+    if (heuristicSummaryWrap) {
+      heuristicSummaryWrap.style.display = "";
+    }
+
     setPolicyLinkUI(heuristicLink, heuristicOpen, "");
     renderReasonList(heuristicReasons, [], {
       emptyMessage: "No meaningful risks are available yet.",
@@ -404,6 +760,7 @@ function renderHeuristic(els, r) {
   const countedRisks = getCountedRisks(findings);
   const riskStats = getRiskStats(findings);
   const sourceState = getSourceState(r);
+  applyPopupRiskTheme(getPopupRiskTheme(r));
 
   if (resultCard) {
     resultCard.style.display = "";
@@ -416,6 +773,9 @@ function renderHeuristic(els, r) {
     } else if (sourceState.type === "linked-policy") {
       policyFinderStatus.textContent =
         "These results come from the site's linked privacy policy, not this current page.";
+    } else if (sourceState.type === "known-domain") {
+      policyFinderStatus.textContent =
+        "These results come from a trusted policy registry for this domain, so the policy stays available across site pages.";
     } else {
       policyFinderStatus.textContent =
         "No trusted privacy policy source was found. Results below are based on current page content only.";
@@ -432,25 +792,29 @@ function renderHeuristic(els, r) {
   }
 
   if (heuristicScore) {
-    heuristicScore.className = "status-text";
+      heuristicScore.className = "status-text";
 
     if (riskStats.high > 0) {
       heuristicScore.classList.add("status-red");
       heuristicScore.textContent =
-        `${riskStats.total} risk${riskStats.total === 1 ? "" : "s"} detected (${riskStats.high} high-impact)`;
+        `${riskStats.high} high-impact policy risk${riskStats.high === 1 ? "" : "s"} found` +
+        (riskStats.total > riskStats.high ? ` (${riskStats.total} total)` : "");
     } else if (riskStats.medium > 0) {
       heuristicScore.classList.add("status-yellow");
       heuristicScore.textContent =
-        `${riskStats.total} risk${riskStats.total === 1 ? "" : "s"} detected`;
+        `${riskStats.medium} medium-impact policy risk${riskStats.medium === 1 ? "" : "s"} found`;
     } else {
       heuristicScore.classList.add("status-green");
       heuristicScore.textContent = "No major privacy risks detected";
     }
   }
 
+  if (heuristicSummaryWrap) {
+    heuristicSummaryWrap.style.display = riskStats.total > 0 ? "none" : "";
+  }
+
   renderReasonList(heuristicReasons, countedRisks, {
-    emptyMessage: "No meaningful privacy risks were counted.",
-    limit: 3,
+    emptyMessage: "No high-impact policy highlights were found.",
   });
 
   renderChecklist(
@@ -463,13 +827,16 @@ function renderHeuristic(els, r) {
     }
   );
 
-  renderFindings(heuristicFindings, countedRisks, {
-    emptyMessage: "No meaningful privacy risks were counted.",
+  const remainingPolicyRisks = countedRisks.filter(
+    (item) => String(item?.severity || "").toLowerCase() !== "high"
+  );
+
+  renderFindings(heuristicFindings, remainingPolicyRisks, {
+    emptyMessage: "No additional medium-impact policy risks were found.",
     limit: 6,
   });
 
-  const analyzedUrl = r.analyzedPolicyUrl || r.bestPolicyLink || "";
-  setPolicyLinkUI(heuristicLink, heuristicOpen, analyzedUrl);
+  setPolicyLinkUI(heuristicLink, heuristicOpen, getPolicyDisplayUrl(r));
 }
 
 function renderMismatch(mismatch) {
@@ -520,6 +887,203 @@ function renderMismatch(mismatch) {
   }
 }
 
+function getTrackerSeverityClass(confidence = "") {
+  const c = String(confidence || "").toLowerCase();
+  if (c === "high") return "tracker-high";
+  if (c === "medium") return "tracker-medium";
+  return "tracker-low";
+}
+
+function appendTrackerItem(parent, {
+  title,
+  summary = "",
+  count = "",
+  chips = [],
+  severity = "low",
+} = {}) {
+  if (!parent) return;
+
+  const item = document.createElement("div");
+  item.className = `tracker-item ${getTrackerSeverityClass(severity)}`;
+
+  const row = document.createElement("div");
+  row.className = "tracker-item-title";
+
+  const titleEl = document.createElement("span");
+  titleEl.textContent = title || "Tracker signal";
+  row.appendChild(titleEl);
+
+  if (count) {
+    const metaEl = document.createElement("span");
+    metaEl.className = "tracker-meta";
+    metaEl.textContent = count;
+    row.appendChild(metaEl);
+  }
+
+  item.appendChild(row);
+
+  if (summary) {
+    const detailEl = document.createElement("div");
+    detailEl.className = "tracker-item-detail";
+    detailEl.textContent = summary;
+    item.appendChild(detailEl);
+  }
+
+  const visibleChips = chips.filter(Boolean).slice(0, 6);
+  if (visibleChips.length) {
+    const chipRow = document.createElement("div");
+    chipRow.className = "tracker-chip-row";
+
+    for (const chip of visibleChips) {
+      const chipEl = document.createElement("span");
+      chipEl.className = "tracker-chip";
+      chipEl.textContent = chip;
+      chipRow.appendChild(chipEl);
+    }
+
+    item.appendChild(chipRow);
+  }
+
+  parent.appendChild(item);
+}
+
+function renderTrackerSignals(trackerSignals = null) {
+  const details = document.getElementById("tracker-details");
+  const summary = document.getElementById("tracker-summary");
+  const list = document.getElementById("tracker-list");
+
+  if (!details || !summary || !list) return;
+
+  list.innerHTML = "";
+
+  const groups = trackerSignals?.groups || {};
+  const counts = trackerSignals?.summary?.counts || {};
+  const trackerHits = Array.isArray(groups.knownTrackers)
+    ? groups.knownTrackers
+    : Array.isArray(trackerSignals?.trackerHits)
+      ? trackerSignals.trackerHits
+      : [];
+  const storageSignals = Array.isArray(groups.storage)
+    ? groups.storage
+    : Array.isArray(trackerSignals?.storageSignals)
+      ? trackerSignals.storageSignals
+      : [];
+  const formSignals = Array.isArray(groups.forms)
+    ? groups.forms
+    : Array.isArray(trackerSignals?.formSignals)
+      ? trackerSignals.formSignals
+      : [];
+  const fingerprintingHints = Array.isArray(groups.fingerprinting)
+    ? groups.fingerprinting
+    : Array.isArray(trackerSignals?.fingerprintingHints)
+      ? trackerSignals.fingerprintingHints
+      : [];
+  const thirdPartyResources = Array.isArray(groups.thirdParty)
+    ? groups.thirdParty
+    : Array.isArray(trackerSignals?.thirdPartyResources)
+      ? trackerSignals.thirdPartyResources
+      : [];
+  const vendorNames = Array.isArray(trackerSignals?.summary?.topVendors)
+    ? trackerSignals.summary.topVendors
+    : [...new Set(trackerHits.map((hit) => hit.vendor).filter(Boolean))];
+  const vendorCount = counts.vendors ?? vendorNames.length;
+
+  const totalSignals =
+    (counts.knownTrackers ?? trackerHits.length) +
+    (counts.storage ?? storageSignals.length) +
+    (counts.forms ?? formSignals.length) +
+    (counts.fingerprinting ?? fingerprintingHints.length);
+
+  if (totalSignals === 0 && thirdPartyResources.length < 6) {
+    details.style.display = "none";
+    summary.className = `summary-box tracker-summary ${getTrackerSeverityClass("low")}`;
+    summary.textContent = "No tracker signals detected.";
+    return;
+  }
+
+  details.style.display = "";
+
+  const confidence = trackerSignals?.summary?.confidence || trackerSignals?.confidence || "low";
+  summary.className = `summary-box tracker-summary ${getTrackerSeverityClass(confidence)}`;
+  summary.textContent = vendorCount
+    ? `${formatConfidence(confidence)} tracker evidence from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
+    : `${formatConfidence(confidence)} tracker evidence detected.`;
+
+  if (vendorNames.length) {
+    const sources = [
+      ...new Set(
+        trackerHits
+          .map((hit) => hit.sourceType || hit.requestType)
+          .filter(Boolean)
+      ),
+    ];
+    const purposes = [
+      ...new Set(trackerHits.map((hit) => hit.purpose).filter(Boolean)),
+    ];
+
+    appendTrackerItem(list, {
+      title: "Known tracker services",
+      summary: purposes.length
+        ? `Used for ${purposes.slice(0, 3).join(", ")}.`
+        : "Known analytics or advertising services were detected.",
+      count: `${trackerHits.length}`,
+      chips: [...vendorNames.slice(0, 4), ...sources.slice(0, 2)],
+      severity: confidence,
+    });
+  }
+
+  if (fingerprintingHints.length) {
+    appendTrackerItem(list, {
+      title: "Fingerprinting hints",
+      summary: "Script patterns may identify the browser or device.",
+      count: `${fingerprintingHints.length}`,
+      chips: fingerprintingHints.slice(0, 4).map((hint) => hint.label || hint.keyword),
+      severity: "high",
+    });
+  }
+
+  if (storageSignals.length) {
+    const labels = [...new Set(storageSignals.map((signal) => signal.label).filter(Boolean))];
+    const highestStorageSeverity = storageSignals.some((signal) => signal.severity === "high")
+      ? "high"
+      : "medium";
+
+    appendTrackerItem(list, {
+      title: "Browser storage signals",
+      summary: "Tracking-style identifiers were found in browser storage.",
+      count: `${storageSignals.length}`,
+      chips: labels.slice(0, 5),
+      severity: highestStorageSeverity,
+    });
+  }
+
+  if (formSignals.length) {
+    const labels = [...new Set(formSignals.map((signal) => signal.label).filter(Boolean))];
+    const highestFormSeverity = formSignals.some((signal) => signal.severity === "high")
+      ? "high"
+      : "medium";
+
+    appendTrackerItem(list, {
+      title: "Data-entry fields",
+      summary: "The page asks for information that can identify a visitor.",
+      count: `${formSignals.length}`,
+      chips: labels.slice(0, 5),
+      severity: highestFormSeverity,
+    });
+  }
+
+  if (!trackerHits.length && thirdPartyResources.length >= 6) {
+    const hosts = [...new Set(thirdPartyResources.map((item) => item.hostname).filter(Boolean))];
+    appendTrackerItem(list, {
+      title: "Third-party resources",
+      summary: "Several outside domains loaded resources on this page.",
+      count: `${thirdPartyResources.length}`,
+      chips: hosts.slice(0, 5),
+      severity: "medium",
+    });
+  }
+}
+
 async function loadHeuristicIntoPopup(els) {
   const tab = await getActiveTab();
   if (!tab?.id) {
@@ -535,6 +1099,7 @@ async function loadHeuristicIntoPopup(els) {
         const r = res?.result || null;
         renderHeuristic(els, r);
         renderMismatch(r?.mismatch || null);
+        renderTrackerSignals(r?.trackerSignals || null);
         resolve(r);
       }
     );
@@ -652,6 +1217,7 @@ async function init() {
     dataChecklist: document.getElementById("data-checklist"),
     heuristicFindings: document.getElementById("heuristic-findings"),
     heuristicSummary: document.getElementById("heuristic-summary"),
+    heuristicSummaryWrap: document.getElementById("heuristic-summary-wrap"),
   };
 
   const protectionEls = getProtectionEls();
