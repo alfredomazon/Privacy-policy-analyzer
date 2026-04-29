@@ -95,6 +95,11 @@ test("groups DOM, network, storage, form, and fingerprinting tracker evidence", 
     assert.ok(result.groups.storage.some((hit) => hit.label === "Facebook tracking key"));
     assert.ok(result.groups.forms.some((hit) => hit.label === "Email field"));
     assert.ok(result.groups.fingerprinting.some((hit) => hit.id === "canvas_readback"));
+    assert.ok(result.groups.knownTrackers.every((hit) => hit.impactReason));
+    assert.ok(result.groups.storage.every((hit) => hit.impactReason));
+    assert.ok(result.groups.forms.every((hit) => hit.impactReason));
+    assert.ok(result.groups.fingerprinting.every((hit) => hit.impactReason));
+    assert.ok(result.summary.impactReasons.includes("fingerprinting"));
     assert.ok(result.summary.counts.vendors >= 3);
   } finally {
     cleanup();
@@ -225,12 +230,17 @@ test("treats routine merchant tracker signals as low impact", () => {
 
     assert.ok(doubleClick);
     assert.equal(doubleClick.routineCommerce, true);
+    assert.equal(doubleClick.impactReason, "routine_commerce");
     assert.equal(doubleClick.severity, "medium");
     assert.equal(result.riskLevel, "low");
     assert.equal(result.summary.routineOnly, true);
+    assert.ok(result.summary.impactReasons.includes("routine_commerce"));
     assert.ok(result.riskScore < 24);
     assert.ok(
       result.groups.forms.every((signal) => signal.severity === "low")
+    );
+    assert.ok(
+      result.groups.forms.every((signal) => signal.impactReason === "routine_form")
     );
     assert.equal(result.confidence, "medium");
   } finally {

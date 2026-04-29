@@ -20,6 +20,25 @@ async function getActiveTab() {
   return tab || null;
 }
 
+function sendRuntimeMessage(message) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      resolve(response || null);
+    });
+  });
+}
+
+async function loadProtectionActivityForTab(tabId) {
+  if (tabId == null) return null;
+
+  const res = await sendRuntimeMessage({
+    type: "GET_PROTECTION_ACTIVITY",
+    tabId,
+  });
+
+  return res?.ok ? res.activity || null : null;
+}
+
 function getHostnameFromUrl(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -1023,9 +1042,125 @@ function highestTrackerSeverity(items = [], fallback = "low") {
   }, fallback);
 }
 
+const TRACKER_WHY_COPY = {
+  routine_commerce:
+    "Normal on shopping pages; useful for analytics or ad conversion, but low impact by itself.",
+  analytics_measurement:
+    "Analytics can measure repeat visits and page activity, usually at lower risk than ad tracking.",
+  cross_site_ads:
+    "Ad services can recognize activity across websites to build targeting signals.",
+  session_replay:
+    "Session replay can record clicks, scrolling, and page interactions.",
+  known_tracker:
+    "Known tracker services can connect page activity to outside analytics or ad systems.",
+  routine_storage:
+    "Stored IDs can remember sessions or ad attribution without being severe by themselves.",
+  persistent_ad_id:
+    "Ad IDs in storage can recognize this browser across visits.",
+  persistent_browser_id:
+    "Persistent IDs can recognize repeat visits from the same browser.",
+  fingerprinting_storage:
+    "Fingerprinting IDs can identify a browser even when cookies are limited.",
+  browser_storage:
+    "Browser storage can keep identifiers after the page closes.",
+  routine_form:
+    "Expected for checkout or account pages; it matters more when paired with trackers.",
+  identifying_form:
+    "Identity fields can link page activity to a specific person.",
+  financial_form:
+    "Payment fields are sensitive and should stay limited to checkout flows.",
+  sensitive_form:
+    "Sensitive fields can reveal highly personal information.",
+  location_form:
+    "Location fields can expose where someone lives or is trying to go.",
+  data_entry:
+    "Data-entry fields can turn anonymous browsing into identifiable activity.",
+  fingerprinting:
+    "Fingerprinting can recognize a browser without relying on normal cookies.",
+  many_third_parties:
+    "Many outside domains make it harder to know who receives page activity.",
+  unknown_third_party:
+    "Unknown third-party code can receive page activity outside the main site.",
+  third_party_resource:
+    "Outside resources can expose page activity to another company.",
+};
+
+function trackerWhyText(reason = "") {
+  const copy = TRACKER_WHY_COPY[String(reason || "")];
+  return copy ? `Why it matters: ${copy}` : "";
+}
+
+function firstImpactReason(items = [], fallback = "") {
+  const high = items.find((item) => trackerSeverityRank(item?.severity) >= 3);
+  const medium = items.find((item) => trackerSeverityRank(item?.severity) >= 2);
+  const any = high || medium || items[0];
+  return any?.impactReason || fallback;
+}
+
+function getProtectionActivityItems(activity = null) {
+  return Array.isArray(activity?.items) ? activity.items : [];
+}
+
+function getProtectionBlockedCount(items = []) {
+  return items.reduce((total, item) => total + Number(item?.count || 1), 0);
+}
+
+function normalizeToken(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function protectionItemMatchesTrackers(item = {}, trackerItems = [], vendorNames = []) {
+  const itemVendor = normalizeToken(item.vendor || item.label);
+  const itemTrackerId = normalizeToken(item.trackerId);
+  const itemHost = normalizeToken(item.hostname);
+  const itemUrl = normalizeToken(item.url);
+  const vendors = new Set(vendorNames.map(normalizeToken).filter(Boolean));
+
+  if (itemVendor && vendors.has(itemVendor)) return true;
+
+  return trackerItems.some((tracker) => {
+    const trackerVendor = normalizeToken(tracker.vendor || tracker.label);
+    const trackerId = normalizeToken(tracker.id || tracker.trackerId);
+    const trackerHost = normalizeToken(tracker.hostname);
+    const trackerUrl = normalizeToken(tracker.url);
+
+    return (
+      (itemTrackerId && trackerId && itemTrackerId === trackerId) ||
+      (itemVendor && trackerVendor && itemVendor === trackerVendor) ||
+      (itemHost && trackerHost && itemHost === trackerHost) ||
+      (itemUrl && trackerUrl && itemUrl === trackerUrl)
+    );
+  });
+}
+
+function getProtectionItemsForTrackers(activity = null, trackerItems = [], vendorNames = []) {
+  return getProtectionActivityItems(activity).filter((item) =>
+    protectionItemMatchesTrackers(item, trackerItems, vendorNames)
+  );
+}
+
+function formatProtectionNotice(items = [], fallback = "matching item") {
+  const count = getProtectionBlockedCount(items);
+  if (!count) return "";
+
+  return `Protect blocked ${count} ${fallback}${count === 1 ? "" : "s"} after the scan.`;
+}
+
+function getProtectionChipLabels(items = []) {
+  return [
+    ...new Set(
+      items
+        .map((item) => item.vendor || item.label || item.hostname)
+        .filter(Boolean)
+    ),
+  ];
+}
+
 function appendTrackerItem(parent, {
   title,
   summary = "",
+  why = "",
+  protection = "",
   count = "",
   chips = [],
   severity = "low",
@@ -1058,6 +1193,20 @@ function appendTrackerItem(parent, {
     item.appendChild(detailEl);
   }
 
+  if (why) {
+    const whyEl = document.createElement("div");
+    whyEl.className = "tracker-item-why";
+    whyEl.textContent = why;
+    item.appendChild(whyEl);
+  }
+
+  if (protection) {
+    const protectionEl = document.createElement("div");
+    protectionEl.className = "tracker-protection-note";
+    protectionEl.textContent = protection;
+    item.appendChild(protectionEl);
+  }
+
   const visibleChips = chips.filter(Boolean).slice(0, 6);
   if (visibleChips.length) {
     const chipRow = document.createElement("div");
@@ -1076,7 +1225,7 @@ function appendTrackerItem(parent, {
   parent.appendChild(item);
 }
 
-function renderTrackerSignals(trackerSignals = null) {
+function renderTrackerSignals(trackerSignals = null, protectionActivity = null) {
   const details = document.getElementById("tracker-details");
   const summary = document.getElementById("tracker-summary");
   const list = document.getElementById("tracker-list");
@@ -1127,6 +1276,8 @@ function renderTrackerSignals(trackerSignals = null) {
     counts.meaningfulThirdParty ??
     trackerSignals?.summary?.thirdPartyProfile?.meaningful ??
     thirdPartyResources.filter((resource) => resource?.likelyBenign !== true).length;
+  const protectionItems = getProtectionActivityItems(protectionActivity);
+  const protectionCount = getProtectionBlockedCount(protectionItems);
 
   const totalSignals =
     (counts.knownTrackers ?? trackerHits.length) +
@@ -1134,7 +1285,7 @@ function renderTrackerSignals(trackerSignals = null) {
     (counts.forms ?? formSignals.length) +
     (counts.fingerprinting ?? fingerprintingHints.length);
 
-  if (totalSignals === 0 && meaningfulThirdPartyCount < 6) {
+  if (totalSignals === 0 && meaningfulThirdPartyCount < 6 && protectionCount === 0) {
     details.style.display = "none";
     summary.className = `summary-box tracker-summary ${getTrackerSeverityClass("low")}`;
     summary.textContent = "No tracker signals detected.";
@@ -1148,7 +1299,9 @@ function renderTrackerSignals(trackerSignals = null) {
   const routineOnly = trackerSignals?.summary?.routineOnly === true;
   const highImpactCount = counts.highImpact ?? 0;
   summary.className = `summary-box tracker-summary ${getTrackerSeverityClass(riskLevel)}`;
-  if (routineOnly) {
+  if (totalSignals === 0 && meaningfulThirdPartyCount < 6 && protectionCount > 0) {
+    summary.textContent = `No tracker signals detected by the scan. Protect blocked ${protectionCount} item${protectionCount === 1 ? "" : "s"} after scanning.`;
+  } else if (routineOnly) {
     summary.textContent = vendorCount
       ? `Routine commerce tracker signals from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
       : "Routine commerce tracker signals detected.";
@@ -1181,6 +1334,14 @@ function renderTrackerSignals(trackerSignals = null) {
       vendorSummaries.length ? vendorSummaries : trackerHits,
       riskLevel
     );
+    const vendorReason =
+      vendorSummaries.flatMap((vendor) => vendor.impactReasons || [])[0] ||
+      firstImpactReason(trackerHits, routineVendors ? "routine_commerce" : "known_tracker");
+    const protectedVendorItems = getProtectionItemsForTrackers(
+      protectionActivity,
+      trackerHits,
+      vendorNames
+    );
 
     appendTrackerItem(list, {
       title: "Known tracker services",
@@ -1189,6 +1350,8 @@ function renderTrackerSignals(trackerSignals = null) {
         : purposes.length
         ? `Used for ${purposes.slice(0, 3).join(", ")} across ${trackerHits.length} request${trackerHits.length === 1 ? "" : "s"}.`
         : `Known analytics or advertising services were detected across ${trackerHits.length} request${trackerHits.length === 1 ? "" : "s"}.`,
+      why: trackerWhyText(vendorReason),
+      protection: formatProtectionNotice(protectedVendorItems, "matching tracker"),
       count: `${vendorCount}`,
       chips: [...vendorNames.slice(0, 4), ...sources.slice(0, 2)],
       severity: vendorSeverity,
@@ -1199,6 +1362,7 @@ function renderTrackerSignals(trackerSignals = null) {
     appendTrackerItem(list, {
       title: "Fingerprinting hints",
       summary: "Script patterns may identify the browser or device.",
+      why: trackerWhyText("fingerprinting"),
       count: `${fingerprintingHints.length}`,
       chips: fingerprintingHints.slice(0, 4).map((hint) => hint.label || hint.keyword),
       severity: "high",
@@ -1217,6 +1381,9 @@ function renderTrackerSignals(trackerSignals = null) {
       summary: routineStorage
         ? "Routine ad attribution, analytics, or session identifiers were found in browser storage."
         : "Tracking-style identifiers were found in browser storage.",
+      why: trackerWhyText(
+        firstImpactReason(storageSignals, routineStorage ? "routine_storage" : "browser_storage")
+      ),
       count: `${storageSignals.length}`,
       chips: labels.slice(0, 5),
       severity: highestStorageSeverity,
@@ -1235,6 +1402,9 @@ function renderTrackerSignals(trackerSignals = null) {
       summary: routineForms
         ? "Checkout, account, or order fields were detected; these are not tracker behavior by themselves."
         : "The page asks for information that can identify a visitor.",
+      why: trackerWhyText(
+        firstImpactReason(formSignals, routineForms ? "routine_form" : "data_entry")
+      ),
       count: `${formSignals.length}`,
       chips: labels.slice(0, 5),
       severity: highestFormSeverity,
@@ -1253,9 +1423,29 @@ function renderTrackerSignals(trackerSignals = null) {
     appendTrackerItem(list, {
       title: "Third-party resources",
       summary: "Several outside domains loaded resources on this page.",
+      why: trackerWhyText(
+        meaningfulThirdPartyCount >= 6 ? "many_third_parties" : "third_party_resource"
+      ),
       count: `${meaningfulThirdPartyCount}`,
       chips: hosts.slice(0, 5),
       severity: "medium",
+    });
+  }
+
+  const unmatchedProtectionItems = protectionItems.filter(
+    (item) => !protectionItemMatchesTrackers(item, trackerHits, vendorNames)
+  );
+
+  if (unmatchedProtectionItems.length) {
+    const labels = getProtectionChipLabels(unmatchedProtectionItems);
+    appendTrackerItem(list, {
+      title: "Protection activity",
+      summary:
+        "Protect acted after the page scan; only blocked tracker behavior can lower the live score.",
+      protection: formatProtectionNotice(unmatchedProtectionItems, "page item"),
+      count: `${getProtectionBlockedCount(unmatchedProtectionItems)}`,
+      chips: labels.slice(0, 5),
+      severity: "low",
     });
   }
 }
@@ -1265,26 +1455,34 @@ async function loadHeuristicIntoPopup(els, { force = false } = {}) {
   if (!tab?.id) {
     renderHeuristic(els, null);
     renderMismatch(null);
+    renderTrackerSignals(null, null);
     return null;
   }
 
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      {
-        type: "getHeuristic",
-        tabId: tab.id,
-        force,
-        repaintToolbar: true,
-      },
-      (res) => {
-        const r = res?.result || null;
-        renderHeuristic(els, r);
-        renderMismatch(r?.mismatch || null);
-        renderTrackerSignals(r?.trackerSignals || null);
-        resolve(r);
-      }
-    );
-  });
+  const [heuristicRes, protectionActivity] = await Promise.all([
+    sendRuntimeMessage({
+      type: "getHeuristic",
+      tabId: tab.id,
+      force,
+      repaintToolbar: true,
+    }),
+    loadProtectionActivityForTab(tab.id),
+  ]);
+
+  const r = heuristicRes?.result || null;
+  renderHeuristic(els, r);
+  renderMismatch(r?.mismatch || null);
+  renderTrackerSignals(r?.trackerSignals || null, protectionActivity);
+  return r;
+}
+
+async function refreshTrackerProtectionView(heuristicResult = null) {
+  const tab = await getActiveTab();
+  const protectionActivity = tab?.id
+    ? await loadProtectionActivityForTab(tab.id)
+    : null;
+
+  renderTrackerSignals(heuristicResult?.trackerSignals || null, protectionActivity);
 }
 
 // ---------- Manual protection UI helpers ----------
@@ -1437,10 +1635,17 @@ async function init() {
       });
 
       if (res?.ok) {
+        protectionState = {
+          ...protectionState,
+          rules,
+        };
         protectionEls.status.className = "status-text status-green";
         protectionEls.status.textContent =
-          "Protection settings saved for this site.";
+          "Protection saved. If it blocks tracker behavior, the eye may update.";
         showToast(toastContainer, "Protection saved", "success");
+        setTimeout(() => {
+          refreshTrackerProtectionView(latestHeuristic);
+        }, 300);
       } else {
         protectionEls.status.className = "status-text status-red";
         protectionEls.status.textContent =
@@ -1461,10 +1666,17 @@ async function init() {
       });
 
       if (res?.ok) {
+        protectionState = {
+          ...protectionState,
+          rules: { ...DEFAULT_PROTECTION_RULES },
+        };
         protectionEls.status.className = "status-text status-blue";
         protectionEls.status.textContent =
           "Protection settings reset for this site.";
         showToast(toastContainer, "Protection reset", "info");
+        setTimeout(() => {
+          refreshTrackerProtectionView(latestHeuristic);
+        }, 300);
       } else {
         protectionEls.status.className = "status-text status-red";
         protectionEls.status.textContent =

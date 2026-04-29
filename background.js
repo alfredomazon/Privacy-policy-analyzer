@@ -26,6 +26,7 @@ const TOOLBAR_STATE_BY_TAB = new Map();
 const LAST_URL_BY_TAB = new Map();
 const SCANNING_TABS = new Set();
 const NETWORK_TRACKER_SIGNALS_BY_TAB = new Map();
+const PROTECTION_ACTIVITY_BY_TAB = new Map();
 const MAX_NETWORK_TRACKER_SIGNALS = 80;
 const PENDING_POLICY_EVIDENCE_BY_TAB = new Map();
 const POLICY_EVIDENCE_RETRY_DELAYS = [250, 700, 1400, 2600, 4200];
@@ -42,9 +43,16 @@ function sameToolbarState(a, b) {
   );
 }
 
-function safeComputeToolbarState(result) {
+function safeComputeToolbarState(result, { protectionActivity = null } = {}) {
   try {
-    const normalized = normalizeHeuristicResult(result);
+    const input =
+      protectionActivity && result
+        ? {
+            ...result,
+            protectionActivity,
+          }
+        : result;
+    const normalized = normalizeHeuristicResult(input);
     const computed = computeFromHeuristic(normalized);
     const toolbarLevel = scoreToLevel(computed.score);
 
@@ -100,10 +108,13 @@ function cacheHeuristicForTab(
 ) {
   if (tabId == null) return null;
 
-  const { normalized, computed } = safeComputeToolbarState(result);
+  const rawNormalized = normalizeHeuristicResult(result);
+  const { normalized, computed } = safeComputeToolbarState(rawNormalized, {
+    protectionActivity: getProtectionActivity(tabId),
+  });
 
   try {
-    setTabCache(tabId, tabUrl || "", normalized);
+    setTabCache(tabId, tabUrl || "", rawNormalized);
     if (tabUrl) {
       LAST_URL_BY_TAB.set(tabId, tabUrl);
     }
@@ -145,6 +156,7 @@ function resetTabState(tabId) {
   LAST_URL_BY_TAB.delete(tabId);
   SCANNING_TABS.delete(tabId);
   clearNetworkTrackerSignals(tabId);
+  clearProtectionActivity(tabId);
   clearPendingPolicyEvidence(tabId);
 }
 
@@ -187,6 +199,106 @@ function getNetworkTrackerSignals(tabId) {
 
 function clearNetworkTrackerSignals(tabId) {
   NETWORK_TRACKER_SIGNALS_BY_TAB.delete(tabId);
+}
+
+function clearProtectionActivity(tabId) {
+  PROTECTION_ACTIVITY_BY_TAB.delete(tabId);
+}
+
+function getProtectionActivity(tabId) {
+  return PROTECTION_ACTIVITY_BY_TAB.get(tabId) || {
+    active: false,
+    scanCompleted: false,
+    counts: { total: 0 },
+    items: [],
+  };
+}
+
+function enrichProtectionActivityItem(item = {}, pageHostname = "") {
+  const url = typeof item.url === "string" ? item.url : "";
+  const classified = url
+    ? classifyTrackerUrl({
+        url,
+        pageHostname,
+        sourceType: "protection",
+        requestType: item.requestType || item.kind || "",
+      })
+    : null;
+
+  if (!classified) return item;
+
+  return {
+    ...item,
+    trackerId: item.trackerId || classified.id || "",
+    vendor: item.vendor || classified.vendor || "",
+    purpose: item.purpose || classified.purpose || "",
+    category: item.category || classified.category || "",
+    severity: item.severity || classified.severity || "",
+    confidence: item.confidence || classified.confidence || "",
+  };
+}
+
+function rememberProtectionActivity(tabId, tabUrl, activity = {}) {
+  if (tabId == null || tabId < 0) return;
+
+  const pageHostname = getHostnameFromUrl(tabUrl || LAST_URL_BY_TAB.get(tabId) || "");
+  const items = Array.isArray(activity.items)
+    ? activity.items
+        .map((item) => enrichProtectionActivityItem(item, pageHostname))
+        .slice(0, 80)
+    : [];
+
+  const counts = items.reduce((acc, item) => {
+    const count = Number(item.count || 1);
+    acc.total += count;
+    acc[item.kind || "resource"] =
+      (acc[item.kind || "resource"] || 0) + count;
+    return acc;
+  }, { total: 0 });
+
+  PROTECTION_ACTIVITY_BY_TAB.set(tabId, {
+    active: !!activity.active,
+    scanCompleted: activity.scanCompleted === true,
+    rules: { ...DEFAULT_MANUAL_RULES, ...(activity.rules || {}) },
+    counts: {
+      ...(activity.counts || {}),
+      ...counts,
+    },
+    items,
+    updatedAt: activity.updatedAt || Date.now(),
+  });
+}
+
+function refreshToolbarFromCachedResult(tabId, tabUrl = "", { force = false } = {}) {
+  if (tabId == null) return;
+
+  const url = tabUrl || LAST_URL_BY_TAB.get(tabId) || "";
+  const cached = getTabCache(tabId, url);
+  if (!cached) return;
+
+  const { computed } = safeComputeToolbarState(cached, {
+    protectionActivity: getProtectionActivity(tabId),
+  });
+
+  updateToolbarIfChanged(tabId, computed, { force });
+}
+
+async function notifyProtectionAfterScan(tabId, tabUrl) {
+  if (tabId == null || tabId < 0) return;
+
+  const hostname = getHostnameFromUrl(tabUrl || "");
+  if (!hostname) return;
+
+  try {
+    const rules = await getManualRulesForHost(hostname);
+    await chrome.tabs.sendMessage(tabId, {
+      type: "APPLY_PROTECTION_AFTER_SCAN",
+      hostname,
+      rules,
+    });
+  } catch {
+    // The protection content script may not be available on this page.
+  }
 }
 
 function rememberPendingPolicyEvidence(tabId, payload) {
@@ -420,6 +532,7 @@ function handleTabLoading(tabId, info) {
     clearTabCache(tabId);
     TOOLBAR_STATE_BY_TAB.delete(tabId);
     clearNetworkTrackerSignals(tabId);
+    clearProtectionActivity(tabId);
   }
 }
 
@@ -509,6 +622,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     cacheHeuristicForTab(tabId, tabUrl, msg.result);
+    notifyProtectionAfterScan(tabId, tabUrl);
     return false;
   }
 
@@ -524,12 +638,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       try {
         const cached = getTabCache(tabId, tab.url || "");
-        if (cached && !msg.force) {
-          const { computed } = safeComputeToolbarState(cached);
+        const protectionActivity = getProtectionActivity(tabId);
+        const protectionHasActed =
+          Number(protectionActivity?.counts?.total || 0) > 0;
+
+        if (cached && (!msg.force || protectionHasActed)) {
+          const { normalized, computed } = safeComputeToolbarState(cached, {
+            protectionActivity,
+          });
           updateToolbarIfChanged(tabId, computed, {
             force: !!msg.repaintToolbar,
           });
-          sendResponse({ ok: true, result: cached });
+          sendResponse({ ok: true, result: normalized });
           return;
         }
 
@@ -554,6 +674,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({
       ok: true,
       signals: tabId == null ? [] : getNetworkTrackerSignals(tabId),
+    });
+    return false;
+  }
+
+  if (msg.type === "PROTECTION_ACTIVITY") {
+    const tabId = sender.tab?.id;
+    const tabUrl = sender.tab?.url || "";
+
+    if (tabId != null) {
+      rememberProtectionActivity(tabId, tabUrl, msg.activity || {});
+      refreshToolbarFromCachedResult(tabId, tabUrl, { force: true });
+    }
+
+    return false;
+  }
+
+  if (msg.type === "GET_PROTECTION_ACTIVITY") {
+    const tabId = msg.tabId;
+    sendResponse({
+      ok: true,
+      activity: tabId == null ? getProtectionActivity(null) : getProtectionActivity(tabId),
     });
     return false;
   }
@@ -628,10 +769,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "GET_RULES_FOR_ACTIVE_TAB") {
     (async () => {
       try {
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
+        const tab =
+          sender.tab ||
+          (await chrome.tabs
+            .query({
+              active: true,
+              currentWindow: true,
+            })
+            .then((tabs) => tabs[0]));
 
         const hostname = getHostnameFromUrl(tab?.url || "");
 
