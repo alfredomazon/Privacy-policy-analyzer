@@ -1,75 +1,48 @@
-privacy-policy-analyzer
+# Evil Eye Privacy Policy Analyzer
 
-What this extension does
-- Provides a popup UI with a toggle labeled "Enable GPT-5 mini for all clients".
-- Persists the setting locally using `chrome.storage.local` and exposes it to the background service worker via messages.
-- Chrome extension popup
-- User pastes privacy policy text
-- User clicks **Analyze**
-- Extension sends the text to https://privacy-policy-analyzer-1.onrender.com
-- Server calls OpenAI
-- Server returns structured results
-- Extension displays results
+Evil Eye is a Chrome extension that helps people understand what a website says it may do with their data and what tracker signals are present on the current page.
 
-System Architecture
+The extension runs its analysis in the browser. It does not require a hosted analyzer, private API credentials, or a separate chat service.
 
-The project has **two main components**:
+## What It Does
 
-### A) Chrome Extension (Frontend)
-Contains:
-- popup UI (`popup.html`, `popup.css`)
-- popup logic (`popup.js`)
-- background service worker (`background.js`)
+- Finds the most likely privacy policy for the current website, including known policy sources for major domains and fallback link discovery for dynamic sites.
+- Keeps trusted policy links available across subpages so a user can open the relevant policy from the extension.
+- Analyzes policy text with local heuristics for data collection, sharing, sale, advertising, location, sensitive data, device identifiers, outside data sources, retention, and user-control language.
+- Shows concise policy highlights with readable evidence quotes and links back to the analyzed policy passage when possible.
+- Separates ordinary merchant behavior from more concerning policy language so routine checkout, account, payment, and service-delivery language does not overfire as high impact.
+- Detects page-level tracker signals from known services, network requests, browser storage, data-entry fields, ads, third-party scripts, and embedded frames.
+- Updates the toolbar eye and popup theme from the combined policy and tracker result.
+- Includes manual protection controls for the current site, including tracker blocking, third-party script blocking, third-party iframe blocking, obvious ad removal, and tracking-link disabling.
 
-Responsibilities:
-- UI + user interaction
-- store token locally
-- send requests to server
-- show results
+## How It Works
 
-### B) Node.js + Express Server (Backend)
-Contains:
-- Express server (`server/server.js`)
-- dependencies (`server/package.json`)
+The extension has three main parts:
 
-Responsibilities:
-- validate incoming token
-- call OpenAI securely
-- return JSON response
-- rate-limit requests
-- allow optional server toggle `/status`
+- `content/content.js` loads the local scanner on pages and reports policy, tracker, and page signals.
+- `background.js` caches scan results per tab, updates the toolbar icon, fetches linked policy documents when needed, and coordinates protection activity.
+- `popup.html`, `popup.css`, and `popup.js` render the scan and protection views.
 
----
+The analyzer uses local JavaScript modules in `lib/` instead of sending policy text to a remote analysis service. Policy pages may still be fetched directly by the extension when the current page links to them, but those requests go to the policy source itself rather than a separate analysis endpoint.
 
-Important
-- This extension stores and exposes a local setting; Enabling GPT-5 mini across clients requires changes on the server-side or admin control-plane and appropriate authentication.
+## Local Development
 
+Run the test suite:
 
-Why it was built this Way
+```bash
+npm test
+```
 
-### The key security issue
-If you put an OpenAI API key inside:
+Load the extension locally:
 
-- `popup.js`
-- `background.js`
-- `manifest.json`
+1. Open Chrome and go to `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Select **Load unpacked**.
+4. Choose this project folder, the one containing `manifest.json`.
+5. Open a website and click the Evil Eye extension icon.
 
-…then anyone can extract the key and drain your credits.
+## Notes
 
-### The correct solution
-Instead, the extension calls **https://privacy-policy-analyzer-1.onrender.com**, and the server calls OpenAI.
-
-This keeps your OpenAI key private and lets user control:
-
-- rate limits
-- abuse protection
-- enabling/disabling AI
-
-
-
-Load locally (unpacked)
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Enable "Developer mode" (top-right).
-3. Click "Load unpacked" and select this folder (where `manifest.json` lives).
-4. Click the extension icon to open the popup and toggle the setting.
-
+- This project is a heuristic analyzer, not legal advice.
+- Scores are meant to help users notice policy and tracker patterns quickly.
+- Manual protection settings are saved per site and can change the tracker portion of the score when blocked tracker activity is the reason the page looked riskier.

@@ -27,6 +27,113 @@ test("does not explode unrelated categories from a targeted advertising negation
   assert.equal(findingTitles.includes("References children or minors"), false);
 });
 
+test("does not flag denied sensitive ad targeting as a policy risk", () => {
+  const result = analyzePolicy([
+    "We don’t show you personalized ads based on sensitive categories, such as race, religion, sexual orientation, or health.",
+  ]);
+
+  const counted = result.findings.filter((finding) => finding.countAsRisk);
+  const sensitive = result.findings.find(
+    (finding) => finding.category === "sensitive"
+  );
+  const tracking = result.findings.find(
+    (finding) => finding.category === "tracking"
+  );
+
+  assert.equal(sensitive, undefined);
+  assert.equal(tracking, undefined);
+  assert.equal(counted.length, 0);
+});
+
+test("does not count denial or student privacy sale language as active sale", () => {
+  const result = analyzePolicy([
+    "Google does not sell your personal information.",
+    "We will not sell or rent student personal data, and we will not use or share student personal data for advertising or similar commercial purposes.",
+  ]);
+
+  const sale = result.findings.find((finding) => finding.category === "sale");
+  const counted = result.findings.filter((finding) => finding.countAsRisk);
+
+  assert.equal(sale?.countAsRisk || false, false);
+  assert.equal(counted.length, 0);
+});
+
+test("does not treat legal disclosure tables as active sale", () => {
+  const result = analyzePolicy([
+    "The categories of third parties to whom we disclose, sell, or share personal information are described below.",
+    "The categories of personal information sold or shared include identifiers and internet activity.",
+  ]);
+
+  const sale = result.findings.find((finding) => finding.category === "sale");
+  const counted = result.findings.filter((finding) => finding.countAsRisk);
+
+  assert.equal(sale?.countAsRisk || false, false);
+  assert.equal(counted.length, 0);
+});
+
+test("does not count denied data-broker language as outside-source risk", () => {
+  const result = analyzePolicy([
+    "We collect the least amount of data possible while maintaining safety measures and the effective operation of the platform.",
+    "Reddit never sells private data, and we never work with data brokers.",
+  ]);
+
+  const external = result.findings.find(
+    (finding) => finding.category === "external_data"
+  );
+  const counted = result.findings.filter((finding) => finding.countAsRisk);
+
+  assert.equal(external?.countAsRisk || false, false);
+  assert.equal(counted.length, 0);
+});
+
+test("does not treat cookie text files as uploaded user files", () => {
+  const result = analyzePolicy([
+    "We use cookies, which are text files placed on your computer, and similar technologies to analyze how users use our services.",
+  ]);
+
+  const content = result.findings.find(
+    (finding) => finding.category === "contacts_content"
+  );
+
+  assert.equal(content, undefined);
+});
+
+test("does not count emergency or privacy-rights verification as sensitive collection", () => {
+  const result = analyzePolicy([
+    "We may collect or share personal data if we think someone's life is in danger, for example to help resolve an urgent medical situation.",
+    "We will need to confirm your identity before processing your request by asking you for additional information, such as a government issued ID.",
+  ]);
+
+  const counted = result.findings.filter((finding) => finding.countAsRisk);
+
+  assert.equal(counted.length, 0);
+});
+
+test("does not count no-access cookie language as tracking", () => {
+  const result = analyzePolicy([
+    "AO3 has no access to cookies set by other sites.",
+  ]);
+
+  const tracking = result.findings.find(
+    (finding) => finding.category === "tracking"
+  );
+
+  assert.equal(tracking, undefined);
+});
+
+test("still counts direct targeted advertising sharing as sale or sharing", () => {
+  const result = analyzePolicy([
+    "We may share your personal information with advertising partners for targeted advertising and cross-context behavioral advertising.",
+  ]);
+
+  const sale = result.findings.find((finding) => finding.category === "sale");
+
+  assert.ok(sale);
+  assert.equal(sale.countAsRisk, true);
+  assert.equal(sale.severity, "high");
+  assert.equal(sale.priorityReason, "sale-or-sharing");
+});
+
 test("downgrades operational service-provider sharing", () => {
   const result = analyzePolicy([
     "We may share information with service providers that help operate the service.",
@@ -347,6 +454,35 @@ test("does not treat nested policy links as sensitive-data evidence", () => {
   );
 
   assert.equal(sensitive, undefined);
+});
+
+test("does not treat storage location headings as geolocation collection", () => {
+  const result = analyzePolicy([
+    "Data Retention and Storage Location",
+    "We store personal data in secure server locations for as long as necessary.",
+  ]);
+
+  const location = result.findings.find(
+    (finding) => finding.category === "location"
+  );
+
+  assert.equal(location, undefined);
+  assert.equal(result.dataCollected.location, false);
+});
+
+test("still detects actual approximate or precise location collection", () => {
+  const result = analyzePolicy([
+    "We collect your approximate location based on your IP address and may collect precise geolocation if you enable location services.",
+  ]);
+
+  const location = result.findings.find(
+    (finding) => finding.category === "location"
+  );
+
+  assert.ok(location);
+  assert.equal(location.countAsRisk, false);
+  assert.equal(location.permissionLimited, true);
+  assert.equal(result.dataCollected.location, true);
 });
 
 test("keeps operational device diagnostics out of high impact", () => {

@@ -53,6 +53,10 @@ body[data-risk-theme="yellow"] {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   width: 420px;
@@ -125,6 +129,14 @@ body {
   border-bottom: none;
 }
 
+.protect-option-master {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--blue-border);
+  border-radius: 12px;
+  background: rgba(var(--theme-rgb), 0.08);
+}
+
 .protect-option input[type="checkbox"] {
   margin-top: 2px;
   accent-color: var(--accent);
@@ -147,6 +159,31 @@ body {
   color: var(--muted);
   line-height: 1.45;
   margin-top: 3px;
+}
+
+.protect-network-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin-top: 8px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+}
+
+.protect-network-chip[hidden] {
+  display: none;
+}
+
+.protect-network-chip-on {
+  color: var(--theme-pill-text);
+  background: rgba(var(--theme-rgb), 0.11);
+  border-color: rgba(var(--theme-rgb), 0.28);
 }
 .brand {
   display: flex;
@@ -300,6 +337,46 @@ body {
   text-shadow: 0 0 6px rgba(var(--theme-rgb), 0.28);
 }
 
+.eye-reason {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--blue-rgb), 0.16);
+  background: rgba(var(--blue-rgb), 0.055);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.eye-reason-red,
+.eye-reason-yellow {
+  border-color: rgba(var(--theme-rgb), 0.22);
+  background: rgba(var(--theme-rgb), 0.065);
+  color: var(--text);
+}
+
+.tracker-driver-note {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--theme-rgb), 0.22);
+  background: rgba(var(--theme-rgb), 0.065);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tracker-driver-note button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
 .summary-box {
   background: var(--panel-2);
   border: 1px solid var(--blue-border);
@@ -322,10 +399,25 @@ body {
   word-break: break-word;
 }
 
-.policy-source-box {
+.policy-source-box,
+.policy-source-content {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.policy-source-details {
+  margin-top: 14px;
+}
+
+.policy-source-details summary {
+  min-height: 44px;
+}
+
+.policy-source-note {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .policy-source-toggle {
@@ -876,6 +968,108 @@ ul.clean-list li {
   border-radius: 8px;
   background: rgba(var(--theme-rgb), 0.08);
   border: 1px solid rgba(var(--theme-rgb), 0.18);
+}
+
+.tracker-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tracker-summary-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tracker-summary-heading {
+  min-width: 0;
+}
+
+.tracker-summary-name {
+  color: var(--theme-pill-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-bottom: 3px;
+}
+
+.tracker-summary-title {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.tracker-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 26px;
+  max-width: 106px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: var(--theme-pill-text);
+  background: rgba(var(--theme-rgb), 0.12);
+  border: 1px solid rgba(var(--theme-rgb), 0.24);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.tracker-summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tracker-summary-metric {
+  min-width: 0;
+  border-radius: 9px;
+  padding: 6px 7px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.tracker-summary-metric strong,
+.tracker-summary-metric span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tracker-summary-metric strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.tracker-summary-metric span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.tracker-protection-summary {
+  color: var(--theme-pill-text);
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.tracker-protection-context {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.tracker-protection-chips {
+  margin-top: 8px;
 }
 
 .tracker-chip-row {

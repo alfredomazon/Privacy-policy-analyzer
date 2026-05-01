@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: popunder chain</title>
+  </head>
+  <body>
+    <button id="download">Download</button>
+    <script>
+      window.open("https://example.test/security-warning/popunder", "_blank");
+      window.open("https://example.test/push/notification", "_blank");
+      window.open("https://example.test/tech-support-alert", "_blank");
+    </script>
+  </body>
+</html>

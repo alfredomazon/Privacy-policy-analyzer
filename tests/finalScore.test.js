@@ -173,6 +173,7 @@ test("protection activity can lower behavior-only tracker score", () => {
   const protectedResult = computeFromHeuristic({
     ...heuristic,
     protectionActivity: {
+      active: true,
       items: [
         {
           kind: "known-tracker",
@@ -188,6 +189,58 @@ test("protection activity can lower behavior-only tracker score", () => {
   assert.equal(scoreToLevel(unprotected.score), "yellow");
   assert.equal(scoreToLevel(protectedResult.score), "blue");
   assert.ok(protectedResult.score < unprotected.score);
+});
+
+test("inactive protection activity does not lower tracker score", () => {
+  const heuristic = normalizeHeuristicResult({
+    isLikelyPolicyPage: false,
+    pageScore: 0,
+    score: 0,
+    pageConfidence: "Low",
+    pageType: "normal",
+    bestPolicyLink: "",
+    bestLinkScore: 0,
+    findings: [],
+    trackerSignals: {
+      riskScore: 60,
+      riskLevel: "high",
+      confidence: "high",
+      trackerHits: [
+        {
+          id: "doubleclick",
+          vendor: "DoubleClick",
+          hostname: "doubleclick.net",
+          category: "sharing",
+          severity: "high",
+          confidence: "high",
+        },
+      ],
+      summary: {
+        riskScore: 60,
+        riskLevel: "high",
+        routineOnly: false,
+      },
+    },
+  });
+
+  const unprotected = computeFromHeuristic(heuristic);
+  const inactiveProtection = computeFromHeuristic({
+    ...heuristic,
+    protectionActivity: {
+      active: false,
+      items: [
+        {
+          kind: "known-tracker",
+          trackerId: "doubleclick",
+          vendor: "DoubleClick",
+          hostname: "doubleclick.net",
+          count: 1,
+        },
+      ],
+    },
+  });
+
+  assert.equal(inactiveProtection.score, unprotected.score);
 });
 
 test("protection lowers only the tracker portion of a policy score", () => {
@@ -243,6 +296,7 @@ test("protection lowers only the tracker portion of a policy score", () => {
   const protectedResult = computeFromHeuristic({
     ...heuristic,
     protectionActivity: {
+      active: true,
       items: [
         {
           kind: "known-tracker",

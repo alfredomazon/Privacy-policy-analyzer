@@ -21,6 +21,7 @@
     <!-- View switch -->
     <div class="view-switch">
       <button id="tab-scan" class="view-tab active" type="button">Scan</button>
+      <button id="tab-trackers" class="view-tab" type="button">Trackers</button>
       <button id="tab-protect" class="view-tab" type="button">Protect</button>
     </div>
 
@@ -34,10 +35,36 @@
           <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
         </div>
 
-        <div id="policy-finder-card" class="section-block">
-          <div class="section-label">Policy source</div>
-          <div class="summary-box policy-source-box">
-            <div id="policy-finder-status">
+        <div id="policy-summary-card" class="section-block">
+          <div class="section-label">Policy result</div>
+          <div id="heuristic-score" class="status-text status-blue">
+            Refresh the page to analyze the site policy.
+          </div>
+          <div id="eye-reason" class="eye-reason" hidden></div>
+          <div id="tracker-driver-note" class="tracker-driver-note" hidden>
+            <span>Trackers are driving this result.</span>
+            <button id="tracker-driver-open" type="button">View</button>
+          </div>
+
+          <div id="heuristic-summary-wrap">
+            <div id="heuristic-summary" class="summary-box">
+              No policy analysis yet.
+            </div>
+          </div>
+        </div>
+
+        <div id="quick-reasons-section" class="section-block">
+          <div class="section-label">Key policy highlights</div>
+          <div id="heuristic-reasons" class="quick-reasons"></div>
+        </div>
+
+        <details id="policy-finder-card" class="section-block policy-source-details">
+          <summary>
+            <span>Policy source</span>
+            <span class="summary-caret">Expand</span>
+          </summary>
+          <div class="details-content policy-source-content">
+            <div id="policy-finder-status" class="policy-source-note">
               Analyzing policy source…
             </div>
 
@@ -53,31 +80,13 @@
               <button id="heuristic-open" type="button" disabled>Open</button>
             </div>
           </div>
-        </div>
-
-        <div id="policy-summary-card" class="section-block">
-          <div class="section-label">Policy result</div>
-          <div id="heuristic-score" class="status-text status-blue">
-            Refresh the page to analyze the site policy.
-          </div>
-
-          <div id="heuristic-summary-wrap">
-            <div id="heuristic-summary" class="summary-box">
-              No policy analysis yet.
-            </div>
-          </div>
-        </div>
-
-        <div id="quick-reasons-section" class="section-block">
-          <div class="section-label">Key policy highlights</div>
-          <div id="heuristic-reasons" class="quick-reasons"></div>
-        </div>
+        </details>
 
       </div>
 
-      <details>
+      <details id="policy-data-details">
         <summary>
-          <span>Policy data risks</span>
+          <span>Other policy risks</span>
           <span class="summary-caret">Expand</span>
         </summary>
         <div class="details-content">
@@ -86,19 +95,26 @@
           </div>
         </div>
       </details>
+    </div>
 
-      <details id="tracker-details">
-        <summary>
-          <span>Page trackers</span>
-          <span class="summary-caret">Expand</span>
-        </summary>
-        <div class="details-content">
+    <!-- =========================
+         VIEW 2: TRACKER DETECTOR
+    ========================== -->
+    <div id="view-trackers" class="popup-view">
+      <div id="tracker-details" class="card tracker-page-card">
+        <div class="row-between">
+          <div class="section-title flush">Tracker Detector</div>
+          <button id="tracker-refresh" class="primary" type="button">Refresh</button>
+        </div>
+
+        <div class="section-block">
+          <div class="section-label">Protection activity</div>
           <div id="tracker-summary" class="summary-box">
-            No tracker signals detected.
+            No known third-party tracker services observed in this page load.
           </div>
           <div id="tracker-list" class="tracker-list"></div>
         </div>
-      </details>
+      </div>
 
       <div class="card" id="mismatch-card">
         <div class="section-title">Policy vs Behavior</div>
@@ -110,22 +126,10 @@
         </div>
         <ul id="mismatch-list" class="clean-list stacked"></ul>
       </div>
-
-      <details>
-        <summary>
-          <span>Detected data categories</span>
-          <span class="summary-caret">Expand</span>
-        </summary>
-        <div class="details-content">
-          <div class="card inner-card">
-            <div id="data-checklist"></div>
-          </div>
-        </div>
-      </details>
     </div>
 
     <!-- =========================
-         VIEW 2: MANUAL PROTECTION
+         VIEW 3: MANUAL PROTECTION
     ========================== -->
     <div id="view-protect" class="popup-view">
       <div class="card">
@@ -137,7 +141,18 @@
         <div class="section-block">
           <div class="section-label">Current site</div>
           <div id="protect-site-label" class="link-box">Loading current site…</div>
+          <div id="protect-network-chip" class="protect-network-chip" hidden>
+            Network blocking active
+          </div>
         </div>
+
+        <label class="protect-option protect-option-master">
+          <input type="checkbox" id="protect-enable-all" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Activate all protections</div>
+            <div class="protect-option-subtitle">Turns on every blocker below for this site.</div>
+          </div>
+        </label>
 
         <label class="protect-option">
           <input type="checkbox" id="protect-block-trackers" />
@@ -176,6 +191,14 @@
           <div class="protect-option-text">
             <div class="protect-option-title">Disable tracking links</div>
             <div class="protect-option-subtitle">Disables obvious redirect and tracking-style links.</div>
+          </div>
+        </label>
+
+        <label class="protect-option">
+          <input type="checkbox" id="protect-block-scam-popups" />
+          <div class="protect-option-text">
+            <div class="protect-option-title">Block scam pop-ups</div>
+            <div class="protect-option-subtitle">Suppresses fake virus alerts, forced popup windows, and notification traps.</div>
           </div>
         </label>
 

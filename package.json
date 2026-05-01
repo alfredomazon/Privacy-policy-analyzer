@@ -1,12 +1,11 @@
 {
+  "name": "privacy-policy-analyzer",
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
+    "benchmark": "node scripts/benchmark.mjs",
+    "protection:live": "node scripts/protection-live-check.mjs",
     "test": "node --test tests/*.test.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.6",
-    "express-rate-limit": "^8.2.1",
-    "helmet": "^8.1.0",
-    "openai": "^6.18.0"
   }
 }

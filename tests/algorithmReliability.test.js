@@ -65,3 +65,25 @@ test("candidate validator rejects narrow privacy control pages", () => {
   assert.equal(validation.isMainPolicy, false);
   assert.ok(validation.rejections.includes("privacy-controls"));
 });
+
+test("candidate validator rejects unrelated infrastructure policies", () => {
+  const validation = validatePolicyCandidate({
+    sourceHost: "www.fandom.com",
+    candidateHost: "www.cloudflare.com",
+    url: "https://www.cloudflare.com/privacypolicy/",
+    titleText: "Cloudflare Privacy Policy",
+    h1Text: "Cloudflare Privacy Policy",
+    candidateType: "privacy_policy",
+    pageType: "normal",
+    text: `
+      Cloudflare Privacy Policy. Information we collect includes identifiers.
+      We explain how we use personal information, how we share information,
+      cookies and analytics, retention, privacy rights, and contact information.
+    `,
+  });
+
+  assert.equal(validation.isMainPolicy, false);
+  assert.equal(validation.brandMatched, false);
+  assert.ok(validation.rejections.includes("brand-mismatch"));
+  assert.ok(validation.scoreAdjustment < -20);
+});
