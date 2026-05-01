@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Privacy Policy Analyzer",
   "version": "0.1.0",
-  "description": "Heuristic privacy policy detector + optional GPT analysis.",
+  "description": "Local privacy policy, tracker, and protection analyzer.",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -37,6 +37,12 @@
       "matches": ["<all_urls>"],
       "js": ["content/content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/popupGuardMain.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     },
     {
       "matches": ["<all_urls>"],

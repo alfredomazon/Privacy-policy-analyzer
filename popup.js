@@ -15,6 +15,8 @@ function showToast(toastContainer, message, type = "info") {
 }
 
 // ---------- Shared helpers ----------
+let popupUserSelectedView = false;
+
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab || null;
@@ -133,6 +135,188 @@ function getRiskStats(findings = []) {
     high,
     medium,
   };
+}
+
+function getTrackerSignalDisplayStats(trackerSignals = null, protectionActivity = null) {
+  const groups = trackerSignals?.groups || {};
+  const counts = trackerSignals?.summary?.counts || {};
+  const trackerHits = Array.isArray(groups.knownTrackers)
+    ? groups.knownTrackers
+    : Array.isArray(trackerSignals?.trackerHits)
+      ? trackerSignals.trackerHits
+      : [];
+  const storageSignals = Array.isArray(groups.storage)
+    ? groups.storage
+    : Array.isArray(trackerSignals?.storageSignals)
+      ? trackerSignals.storageSignals
+      : [];
+  const formSignals = Array.isArray(groups.forms)
+    ? groups.forms
+    : Array.isArray(trackerSignals?.formSignals)
+      ? trackerSignals.formSignals
+      : [];
+  const fingerprintingHints = Array.isArray(groups.fingerprinting)
+    ? groups.fingerprinting
+    : Array.isArray(trackerSignals?.fingerprintingHints)
+      ? trackerSignals.fingerprintingHints
+      : [];
+  const thirdPartyResources = Array.isArray(groups.thirdParty)
+    ? groups.thirdParty
+    : Array.isArray(trackerSignals?.thirdPartyResources)
+      ? trackerSignals.thirdPartyResources
+      : [];
+  const meaningfulThirdPartyCount =
+    counts.meaningfulThirdParty ??
+    trackerSignals?.summary?.thirdPartyProfile?.meaningful ??
+    thirdPartyResources.filter((resource) => resource?.likelyBenign !== true).length;
+  const protectionCount = getProtectionBlockedCount(
+    getProtectionActivityItems(protectionActivity)
+  );
+
+  const totalSignals =
+    (counts.knownTrackers ?? trackerHits.length) +
+    (counts.storage ?? storageSignals.length) +
+    (counts.forms ?? formSignals.length) +
+    (counts.fingerprinting ?? fingerprintingHints.length);
+
+  return {
+    totalSignals,
+    meaningfulThirdPartyCount,
+    protectionCount,
+    visible:
+      totalSignals > 0 || meaningfulThirdPartyCount >= 6 || protectionCount > 0,
+  };
+}
+
+function shouldPrioritizeTrackerSection(result = null, protectionActivity = null) {
+  if (!result) return false;
+
+  const theme = getPopupRiskTheme(result);
+  if (theme === "blue") return false;
+
+  const policyStats = getRiskStats(result.findings || []);
+  if (policyStats.high > 0) return false;
+
+  const trackerStats = getTrackerSignalDisplayStats(
+    result.trackerSignals || null,
+    protectionActivity
+  );
+  if (!trackerStats.visible) return false;
+
+  const levelHint = String(result?.toolbarState?.levelHint || "").toLowerCase();
+  const trackerRiskScore = getTrackerRiskScore(result);
+
+  return (
+    levelHint === "behavior-risk" ||
+    trackerRiskScore >= 24 ||
+    policyStats.total === 0
+  );
+}
+
+function getToolbarScore(result = {}) {
+  const value = result?.toolbarState?.score;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function getTrackerRiskScore(result = {}) {
+  const value =
+    result?.trackerSignals?.summary?.riskScore ??
+    result?.trackerSignals?.riskScore;
+
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function getTopCountedRisk(result = {}) {
+  return sortFindingsForDisplay(getCountedRisks(result?.findings || []))[0] || null;
+}
+
+function buildEyeReason(result = null, protectionActivity = null) {
+  if (!result) return "";
+
+  const theme = getPopupRiskTheme(result);
+  const score = getToolbarScore(result);
+  const scoreText = score > 0 ? ` (${score}/100)` : "";
+  const riskStats = getRiskStats(result.findings || []);
+  const topRisk = getTopCountedRisk(result);
+  const trackerStats = getTrackerSignalDisplayStats(
+    result.trackerSignals || null,
+    protectionActivity
+  );
+  const trackerRiskScore = getTrackerRiskScore(result);
+  const protectionCount = trackerStats.protectionCount || 0;
+  const levelHint = String(result?.toolbarState?.levelHint || "").toLowerCase();
+
+  if (theme === "blue") {
+    if (protectionCount > 0) {
+      return `Blue eye${scoreText}: no major policy risk is active, and Protect has blocked page behavior after the scan.`;
+    }
+    return `Blue eye${scoreText}: no major policy or tracker signal is currently driving the score.`;
+  }
+
+  if (
+    levelHint === "behavior-risk" ||
+    (riskStats.high === 0 && trackerStats.visible && trackerRiskScore >= 24)
+  ) {
+    const protectedText = protectionCount
+      ? ` Protect blocked ${protectionCount} item${protectionCount === 1 ? "" : "s"}, so the eye reflects the reduced tracker score.`
+      : "";
+    return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: page trackers are the strongest signal, not a high-impact policy finding.${protectedText}`;
+  }
+
+  if (riskStats.high > 0 && topRisk) {
+    return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: the policy highlight “${topRisk.title}” is currently driving the score.`;
+  }
+
+  if (riskStats.medium > 0) {
+    return `Yellow eye${scoreText}: policy concerns are present, but no high-impact policy highlight is active.`;
+  }
+
+  if (trackerStats.visible) {
+    return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: tracker activity is currently driving the score.`;
+  }
+
+  return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: the current page has enough privacy signals to raise the score.`;
+}
+
+function renderEyeReason(result = null, protectionActivity = null) {
+  const el = document.getElementById("eye-reason");
+  if (!el) return;
+
+  const reason = buildEyeReason(result, protectionActivity);
+  if (!reason) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+
+  const theme = getPopupRiskTheme(result);
+  el.hidden = false;
+  el.className = `eye-reason eye-reason-${theme}`;
+  el.textContent = reason;
+}
+
+function syncTrackerShortcut(result = null, protectionActivity = null) {
+  const note = document.getElementById("tracker-driver-note");
+  if (!note) return false;
+
+  const prioritizeTrackers = shouldPrioritizeTrackerSection(
+    result,
+    protectionActivity
+  );
+
+  note.hidden = !prioritizeTrackers;
+  note.style.display = prioritizeTrackers ? "" : "none";
+  return prioritizeTrackers;
+}
+
+function syncTrackerShortcutAndAutoView(result = null, protectionActivity = null) {
+  const prioritizeTrackers = syncTrackerShortcut(result, protectionActivity);
+
+  if (!popupUserSelectedView) {
+    activateView(prioritizeTrackers ? "trackers" : "scan");
+  }
+
+  return prioritizeTrackers;
 }
 
 function getThemeFromToolbarScore(score = 0) {
@@ -841,6 +1025,7 @@ function renderHeuristic(els, r) {
 
   if (!r) {
     applyPopupRiskTheme("blue");
+    renderEyeReason(null);
 
     if (resultCard) {
       resultCard.style.display = "";
@@ -1044,29 +1229,29 @@ function highestTrackerSeverity(items = [], fallback = "low") {
 
 const TRACKER_WHY_COPY = {
   routine_commerce:
-    "Normal on shopping pages; useful for analytics or ad conversion, but low impact by itself.",
+    "Common on shopping pages for analytics or ad conversion; low impact unless paired with stronger tracking.",
   analytics_measurement:
-    "Analytics can measure repeat visits and page activity, usually at lower risk than ad tracking.",
+    "Measures visits and page activity so the site can tune features; usually lower risk than ad profiling.",
   cross_site_ads:
-    "Ad services can recognize activity across websites to build targeting signals.",
+    "Ad networks can connect this page visit to profiles used across other websites.",
   session_replay:
-    "Session replay can record clicks, scrolling, and page interactions.",
+    "Can record clicks, scrolling, typing patterns, and other page interactions.",
   known_tracker:
-    "Known tracker services can connect page activity to outside analytics or ad systems.",
+    "Sends page activity to an outside analytics or advertising service.",
   routine_storage:
-    "Stored IDs can remember sessions or ad attribution without being severe by themselves.",
+    "Keeps session or ad-attribution IDs; not severe by itself, but useful for repeat recognition.",
   persistent_ad_id:
-    "Ad IDs in storage can recognize this browser across visits.",
+    "Stores ad identifiers that can recognize this browser across visits.",
   persistent_browser_id:
-    "Persistent IDs can recognize repeat visits from the same browser.",
+    "Stores identifiers that can recognize repeat visits from the same browser.",
   fingerprinting_storage:
-    "Fingerprinting IDs can identify a browser even when cookies are limited.",
+    "Stores fingerprint-style IDs that may still identify a browser when cookies are limited.",
   browser_storage:
-    "Browser storage can keep identifiers after the page closes.",
+    "Browser storage can keep identifiers after the tab closes.",
   routine_form:
     "Expected for checkout or account pages; it matters more when paired with trackers.",
   identifying_form:
-    "Identity fields can link page activity to a specific person.",
+    "Identity fields can tie browsing behavior to a specific person.",
   financial_form:
     "Payment fields are sensitive and should stay limited to checkout flows.",
   sensitive_form:
@@ -1078,7 +1263,7 @@ const TRACKER_WHY_COPY = {
   fingerprinting:
     "Fingerprinting can recognize a browser without relying on normal cookies.",
   many_third_parties:
-    "Many outside domains make it harder to know who receives page activity.",
+    "Many outside domains make it harder to know which companies receive page activity.",
   unknown_third_party:
     "Unknown third-party code can receive page activity outside the main site.",
   third_party_resource:
@@ -1098,11 +1283,212 @@ function firstImpactReason(items = [], fallback = "") {
 }
 
 function getProtectionActivityItems(activity = null) {
+  if (activity?.active !== true) return [];
   return Array.isArray(activity?.items) ? activity.items : [];
 }
 
 function getProtectionBlockedCount(items = []) {
   return items.reduce((total, item) => total + Number(item?.count || 1), 0);
+}
+
+function pluralizeProtectionLabel(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function summarizeProtectionActivity(items = []) {
+  const counts = items.reduce((acc, item) => {
+    const count = Number(item?.count || 1);
+    const kind = String(item?.kind || "").toLowerCase();
+
+    if (kind === "popup-scam") {
+      acc.scamPopups += count;
+    } else if (kind === "tracking-link") {
+      acc.trackingLinks += count;
+    } else if (kind === "ad-element") {
+      acc.ads += count;
+    } else if (
+      kind === "known-tracker" ||
+      kind === "ad-resource" ||
+      kind === "resource"
+    ) {
+      acc.trackerRequests += count;
+    } else if (kind === "third-party-script") {
+      acc.thirdPartyScripts += count;
+    } else if (kind === "third-party-iframe") {
+      acc.thirdPartyFrames += count;
+    } else {
+      acc.pageItems += count;
+    }
+
+    return acc;
+  }, {
+    trackerRequests: 0,
+    scamPopups: 0,
+    trackingLinks: 0,
+    ads: 0,
+    thirdPartyScripts: 0,
+    thirdPartyFrames: 0,
+    pageItems: 0,
+  });
+
+  const parts = [];
+
+  if (counts.trackerRequests) {
+    parts.push(
+      pluralizeProtectionLabel(
+        counts.trackerRequests,
+        "tracker/ad request"
+      )
+    );
+  }
+
+  if (counts.scamPopups) {
+    parts.push(pluralizeProtectionLabel(counts.scamPopups, "fake popup"));
+  }
+
+  if (counts.trackingLinks) {
+    parts.push(pluralizeProtectionLabel(counts.trackingLinks, "tracking link"));
+  }
+
+  if (counts.ads) {
+    parts.push(pluralizeProtectionLabel(counts.ads, "ad element"));
+  }
+
+  if (counts.thirdPartyScripts) {
+    parts.push(
+      pluralizeProtectionLabel(
+        counts.thirdPartyScripts,
+        "third-party script"
+      )
+    );
+  }
+
+  if (counts.thirdPartyFrames) {
+    parts.push(
+      pluralizeProtectionLabel(
+        counts.thirdPartyFrames,
+        "third-party frame"
+      )
+    );
+  }
+
+  if (counts.pageItems) {
+    parts.push(pluralizeProtectionLabel(counts.pageItems, "page item"));
+  }
+
+  return parts.length ? `Protected from: ${parts.join(", ")}.` : "";
+}
+
+function appendProtectionActivitySummary(parent, items = []) {
+  const text = summarizeProtectionActivity(items);
+  if (!parent || !text) return;
+
+  const line = document.createElement("div");
+  line.className = "tracker-protection-summary";
+  line.textContent = text;
+  parent.appendChild(line);
+
+  const context = document.createElement("div");
+  context.className = "tracker-protection-context";
+  context.textContent = "Only blocked tracker behavior can lower the live score.";
+  parent.appendChild(context);
+
+  const labels = getProtectionChipLabels(items).slice(0, 5);
+  if (!labels.length) return;
+
+  const chipRow = document.createElement("div");
+  chipRow.className = "tracker-chip-row tracker-protection-chips";
+
+  for (const label of labels) {
+    const chip = document.createElement("span");
+    chip.className = "tracker-chip";
+    chip.textContent = label;
+    chipRow.appendChild(chip);
+  }
+
+  parent.appendChild(chipRow);
+}
+
+function appendTrackerSummaryMetric(parent, label, value) {
+  if (!parent || value == null || value === "") return;
+
+  const metric = document.createElement("div");
+  metric.className = "tracker-summary-metric";
+
+  const valueEl = document.createElement("strong");
+  valueEl.textContent = String(value);
+
+  const labelEl = document.createElement("span");
+  labelEl.textContent = label;
+
+  metric.appendChild(valueEl);
+  metric.appendChild(labelEl);
+  parent.appendChild(metric);
+}
+
+function renderTrackerSummaryBox(summary, {
+  riskLevel = "low",
+  title = "",
+  protectionItems = [],
+  vendorCount = 0,
+  totalSignals = 0,
+  meaningfulThirdPartyCount = 0,
+} = {}) {
+  if (!summary) return;
+
+  const protectionCount = getProtectionBlockedCount(protectionItems);
+  summary.className = `summary-box tracker-summary ${getTrackerSeverityClass(riskLevel)}`;
+  summary.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "tracker-summary-header";
+
+  const text = document.createElement("div");
+  text.className = "tracker-summary-heading";
+
+  const name = document.createElement("div");
+  name.className = "tracker-summary-name";
+  name.textContent = "Live tracker status";
+  text.appendChild(name);
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "tracker-summary-title";
+  titleEl.textContent = title || "No tracker activity summary is available yet.";
+  text.appendChild(titleEl);
+
+  header.appendChild(text);
+
+  const badge = document.createElement("span");
+  badge.className = "tracker-summary-badge";
+  badge.textContent = protectionCount
+    ? `${protectionCount} blocked`
+    : totalSignals
+      ? `${totalSignals} seen`
+      : "Clear";
+  header.appendChild(badge);
+
+  summary.appendChild(header);
+
+  const metrics = document.createElement("div");
+  metrics.className = "tracker-summary-metrics";
+  appendTrackerSummaryMetric(metrics, "services", vendorCount || 0);
+  appendTrackerSummaryMetric(metrics, "signals", totalSignals || 0);
+  if (meaningfulThirdPartyCount >= 6) {
+    appendTrackerSummaryMetric(metrics, "outside domains", meaningfulThirdPartyCount);
+  }
+  appendTrackerSummaryMetric(metrics, "blocked", protectionCount || 0);
+  summary.appendChild(metrics);
+
+  if (protectionCount > 0) {
+    appendProtectionActivitySummary(summary, protectionItems);
+    return;
+  }
+
+  const context = document.createElement("div");
+  context.className = "tracker-protection-context";
+  context.textContent =
+    "No protection blocks were recorded for this page load.";
+  summary.appendChild(context);
 }
 
 function normalizeToken(value = "") {
@@ -1286,9 +1672,15 @@ function renderTrackerSignals(trackerSignals = null, protectionActivity = null) 
     (counts.fingerprinting ?? fingerprintingHints.length);
 
   if (totalSignals === 0 && meaningfulThirdPartyCount < 6 && protectionCount === 0) {
-    details.style.display = "none";
-    summary.className = `summary-box tracker-summary ${getTrackerSeverityClass("low")}`;
-    summary.textContent = "No tracker signals detected.";
+    details.style.display = "";
+    renderTrackerSummaryBox(summary, {
+      riskLevel: "low",
+      title: "No known third-party tracker services observed in this page load.",
+      protectionItems,
+      vendorCount,
+      totalSignals,
+      meaningfulThirdPartyCount,
+    });
     return;
   }
 
@@ -1298,22 +1690,31 @@ function renderTrackerSignals(trackerSignals = null, protectionActivity = null) 
   const riskLevel = trackerSignals?.summary?.riskLevel || trackerSignals?.riskLevel || confidence;
   const routineOnly = trackerSignals?.summary?.routineOnly === true;
   const highImpactCount = counts.highImpact ?? 0;
-  summary.className = `summary-box tracker-summary ${getTrackerSeverityClass(riskLevel)}`;
+  let summaryTitle = "";
   if (totalSignals === 0 && meaningfulThirdPartyCount < 6 && protectionCount > 0) {
-    summary.textContent = `No tracker signals detected by the scan. Protect blocked ${protectionCount} item${protectionCount === 1 ? "" : "s"} after scanning.`;
+    summaryTitle =
+      "No known third-party tracker services were observed in this page load.";
   } else if (routineOnly) {
-    summary.textContent = vendorCount
+    summaryTitle = vendorCount
       ? `Routine commerce tracker signals from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
       : "Routine commerce tracker signals detected.";
   } else if (highImpactCount > 0) {
-    summary.textContent = vendorCount
+    summaryTitle = vendorCount
       ? `${formatTrackerImpact(riskLevel)} tracker evidence from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
       : `${formatTrackerImpact(riskLevel)} tracker evidence detected.`;
   } else {
-    summary.textContent = vendorCount
+    summaryTitle = vendorCount
       ? `${formatTrackerImpact(riskLevel)} tracker evidence from ${vendorCount} known service${vendorCount === 1 ? "" : "s"}.`
       : `${formatTrackerImpact(riskLevel)} tracker evidence detected.`;
   }
+  renderTrackerSummaryBox(summary, {
+    riskLevel,
+    title: summaryTitle,
+    protectionItems,
+    vendorCount,
+    totalSignals,
+    meaningfulThirdPartyCount,
+  });
 
   if (vendorNames.length) {
     const sources = [
@@ -1432,22 +1833,7 @@ function renderTrackerSignals(trackerSignals = null, protectionActivity = null) 
     });
   }
 
-  const unmatchedProtectionItems = protectionItems.filter(
-    (item) => !protectionItemMatchesTrackers(item, trackerHits, vendorNames)
-  );
-
-  if (unmatchedProtectionItems.length) {
-    const labels = getProtectionChipLabels(unmatchedProtectionItems);
-    appendTrackerItem(list, {
-      title: "Protection activity",
-      summary:
-        "Protect acted after the page scan; only blocked tracker behavior can lower the live score.",
-      protection: formatProtectionNotice(unmatchedProtectionItems, "page item"),
-      count: `${getProtectionBlockedCount(unmatchedProtectionItems)}`,
-      chips: labels.slice(0, 5),
-      severity: "low",
-    });
-  }
+  // Protection activity is summarized at the top to avoid repeating it as a card.
 }
 
 async function loadHeuristicIntoPopup(els, { force = false } = {}) {
@@ -1456,6 +1842,8 @@ async function loadHeuristicIntoPopup(els, { force = false } = {}) {
     renderHeuristic(els, null);
     renderMismatch(null);
     renderTrackerSignals(null, null);
+    renderEyeReason(null);
+    syncTrackerShortcutAndAutoView(null, null);
     return null;
   }
 
@@ -1473,6 +1861,8 @@ async function loadHeuristicIntoPopup(els, { force = false } = {}) {
   renderHeuristic(els, r);
   renderMismatch(r?.mismatch || null);
   renderTrackerSignals(r?.trackerSignals || null, protectionActivity);
+  renderEyeReason(r, protectionActivity);
+  syncTrackerShortcutAndAutoView(r, protectionActivity);
   return r;
 }
 
@@ -1483,6 +1873,8 @@ async function refreshTrackerProtectionView(heuristicResult = null) {
     : null;
 
   renderTrackerSignals(heuristicResult?.trackerSignals || null, protectionActivity);
+  renderEyeReason(heuristicResult, protectionActivity);
+  syncTrackerShortcutAndAutoView(heuristicResult, protectionActivity);
 }
 
 // ---------- Manual protection UI helpers ----------
@@ -1492,20 +1884,79 @@ const DEFAULT_PROTECTION_RULES = {
   blockIframes: false,
   removeAds: false,
   disableTrackingLinks: false,
+  blockScamPopups: false,
 };
+
+const PROTECTION_RULE_KEYS = Object.keys(DEFAULT_PROTECTION_RULES);
 
 function getProtectionEls() {
   return {
     siteLabel: document.getElementById("protect-site-label"),
+    networkChip: document.getElementById("protect-network-chip"),
+    enableAll: document.getElementById("protect-enable-all"),
     blockTrackers: document.getElementById("protect-block-trackers"),
     blockThirdPartyScripts: document.getElementById("protect-block-third-party-scripts"),
     blockIframes: document.getElementById("protect-block-iframes"),
     removeAds: document.getElementById("protect-remove-ads"),
     disableTrackingLinks: document.getElementById("protect-disable-tracking-links"),
+    blockScamPopups: document.getElementById("protect-block-scam-popups"),
     saveBtn: document.getElementById("protect-save"),
     resetBtn: document.getElementById("protect-reset"),
     status: document.getElementById("protect-status"),
   };
+}
+
+function protectionUsesNetworkBlocking(rules = {}) {
+  const merged = { ...DEFAULT_PROTECTION_RULES, ...(rules || {}) };
+  return !!(merged.blockTrackers || merged.removeAds);
+}
+
+function updateProtectionNetworkChip(els, savedRules = {}) {
+  if (!els.networkChip) return;
+
+  const savedActive = protectionUsesNetworkBlocking(savedRules);
+
+  els.networkChip.hidden = !savedActive;
+  els.networkChip.className = "protect-network-chip protect-network-chip-on";
+  els.networkChip.textContent = "Network blocking active";
+  els.networkChip.title =
+    "Known tracker and ad requests are blocked before they load on this site.";
+}
+
+function getProtectionInputs(els) {
+  return PROTECTION_RULE_KEYS
+    .map((key) => els[key])
+    .filter(Boolean);
+}
+
+function syncEnableAllProtectionControl(els) {
+  if (!els.enableAll) return;
+
+  const inputs = getProtectionInputs(els);
+  const enabledCount = inputs.filter((input) => input.checked).length;
+
+  els.enableAll.checked = inputs.length > 0 && enabledCount === inputs.length;
+  els.enableAll.indeterminate =
+    enabledCount > 0 && enabledCount < inputs.length;
+}
+
+function setProtectionInputsDisabled(els, disabled) {
+  if (els.enableAll) els.enableAll.disabled = disabled;
+
+  for (const input of getProtectionInputs(els)) {
+    input.disabled = disabled;
+  }
+}
+
+function setProtectionActionsDisabled(els, disabled) {
+  els.saveBtn.disabled = disabled;
+  els.resetBtn.disabled = disabled;
+  setProtectionInputsDisabled(els, disabled);
+}
+
+function markProtectionChoicesChanged(els, message) {
+  els.status.className = "status-text status-blue";
+  els.status.textContent = message;
 }
 
 function setProtectionUi(els, rules = {}) {
@@ -1516,6 +1967,8 @@ function setProtectionUi(els, rules = {}) {
   els.blockIframes.checked = !!merged.blockIframes;
   els.removeAds.checked = !!merged.removeAds;
   els.disableTrackingLinks.checked = !!merged.disableTrackingLinks;
+  els.blockScamPopups.checked = !!merged.blockScamPopups;
+  syncEnableAllProtectionControl(els);
 }
 
 function readProtectionUi(els) {
@@ -1525,6 +1978,7 @@ function readProtectionUi(els) {
     blockIframes: !!els.blockIframes.checked,
     removeAds: !!els.removeAds.checked,
     disableTrackingLinks: !!els.disableTrackingLinks.checked,
+    blockScamPopups: !!els.blockScamPopups.checked,
   };
 }
 
@@ -1534,9 +1988,9 @@ async function loadProtectionRulesIntoPopup(els, tab) {
   if (!hostname) {
     els.siteLabel.textContent = "Unsupported page";
     els.status.textContent = "Could not load site protection settings.";
-    els.saveBtn.disabled = true;
-    els.resetBtn.disabled = true;
+    setProtectionActionsDisabled(els, true);
     setProtectionUi(els, DEFAULT_PROTECTION_RULES);
+    updateProtectionNetworkChip(els, DEFAULT_PROTECTION_RULES);
     return { hostname: "", rules: { ...DEFAULT_PROTECTION_RULES } };
   }
 
@@ -1551,38 +2005,48 @@ async function loadProtectionRulesIntoPopup(els, tab) {
     : { ...DEFAULT_PROTECTION_RULES };
 
   setProtectionUi(els, rules);
+  updateProtectionNetworkChip(els, rules);
   els.status.textContent = "Manual controls are ready for this site.";
-  els.saveBtn.disabled = false;
-  els.resetBtn.disabled = false;
+  setProtectionActionsDisabled(els, false);
 
   return { hostname, rules };
 }
 
 // ---------- Popup view switch ----------
-function activateView(viewName) {
+function activateView(viewName, options = {}) {
+  if (options.user === true) {
+    popupUserSelectedView = true;
+  }
+
   const scanTab = document.getElementById("tab-scan");
+  const trackerTab = document.getElementById("tab-trackers");
   const protectTab = document.getElementById("tab-protect");
   const scanView = document.getElementById("view-scan");
+  const trackerView = document.getElementById("view-trackers");
   const protectView = document.getElementById("view-protect");
 
-  scanTab.classList.remove("active");
-  protectTab.classList.remove("active");
-  scanView.classList.remove("active");
-  protectView.classList.remove("active");
+  const views = {
+    scan: { tab: scanTab, view: scanView },
+    trackers: { tab: trackerTab, view: trackerView },
+    protect: { tab: protectTab, view: protectView },
+  };
+  const activeName = views[viewName] ? viewName : "scan";
 
-  if (viewName === "protect") {
-    protectTab.classList.add("active");
-    protectView.classList.add("active");
-  } else {
-    scanTab.classList.add("active");
-    scanView.classList.add("active");
+  for (const item of Object.values(views)) {
+    item.tab?.classList.remove("active");
+    item.view?.classList.remove("active");
   }
+
+  views[activeName].tab?.classList.add("active");
+  views[activeName].view?.classList.add("active");
 }
 
 async function init() {
   const toastContainer = document.getElementById("toast-container");
   const autoBtn = document.getElementById("auto-analyze");
   const heuristicRefreshBtn = document.getElementById("heuristic-refresh");
+  const trackerRefreshBtn = document.getElementById("tracker-refresh");
+  const trackerDriverOpen = document.getElementById("tracker-driver-open");
 
   const heuristicEls = {
     resultCard: document.getElementById("policy-result-card"),
@@ -1593,7 +2057,6 @@ async function init() {
     heuristicLink: document.getElementById("heuristic-link"),
     heuristicOpen: document.getElementById("heuristic-open"),
     heuristicReasons: document.getElementById("heuristic-reasons"),
-    dataChecklist: document.getElementById("data-checklist"),
     heuristicFindings: document.getElementById("heuristic-findings"),
     heuristicSummary: document.getElementById("heuristic-summary"),
     heuristicSummaryWrap: document.getElementById("heuristic-summary-wrap"),
@@ -1604,6 +2067,13 @@ async function init() {
 
   let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
   let protectionState = await loadProtectionRulesIntoPopup(protectionEls, activeTab);
+  const initialProtectionActivity = activeTab?.id
+    ? await loadProtectionActivityForTab(activeTab.id)
+    : null;
+  syncTrackerShortcutAndAutoView(
+    latestHeuristic,
+    initialProtectionActivity
+  );
 
   if (heuristicRefreshBtn) {
     heuristicRefreshBtn.addEventListener("click", async () => {
@@ -1614,6 +2084,21 @@ async function init() {
     });
   }
 
+  if (trackerRefreshBtn) {
+    trackerRefreshBtn.addEventListener("click", async () => {
+      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls, {
+        force: true,
+      });
+      showToast(toastContainer, "Tracker check refreshed", "info");
+    });
+  }
+
+  if (trackerDriverOpen) {
+    trackerDriverOpen.addEventListener("click", () => {
+      activateView("trackers", { user: true });
+    });
+  }
+
   if (autoBtn) {
     autoBtn.textContent = "Refresh";
     autoBtn.addEventListener("click", async () => {
@@ -1621,6 +2106,34 @@ async function init() {
         force: true,
       });
       showToast(toastContainer, "Summary refreshed", "info");
+    });
+  }
+
+  if (protectionEls.enableAll) {
+    protectionEls.enableAll.addEventListener("change", () => {
+      const enabled = !!protectionEls.enableAll.checked;
+
+      for (const input of getProtectionInputs(protectionEls)) {
+        input.checked = enabled;
+      }
+
+      syncEnableAllProtectionControl(protectionEls);
+      markProtectionChoicesChanged(
+        protectionEls,
+        enabled
+          ? "All protections selected. Save to apply them to this site."
+          : "All protections cleared. Save to apply this change."
+      );
+    });
+  }
+
+  for (const input of getProtectionInputs(protectionEls)) {
+    input.addEventListener("change", () => {
+      syncEnableAllProtectionControl(protectionEls);
+      markProtectionChoicesChanged(
+        protectionEls,
+        "Protection choices changed. Save to apply them to this site."
+      );
     });
   }
 
@@ -1642,6 +2155,7 @@ async function init() {
         protectionEls.status.className = "status-text status-green";
         protectionEls.status.textContent =
           "Protection saved. If it blocks tracker behavior, the eye may update.";
+        updateProtectionNetworkChip(protectionEls, rules);
         showToast(toastContainer, "Protection saved", "success");
         setTimeout(() => {
           refreshTrackerProtectionView(latestHeuristic);
@@ -1673,6 +2187,7 @@ async function init() {
         protectionEls.status.className = "status-text status-blue";
         protectionEls.status.textContent =
           "Protection settings reset for this site.";
+        updateProtectionNetworkChip(protectionEls, DEFAULT_PROTECTION_RULES);
         showToast(toastContainer, "Protection reset", "info");
         setTimeout(() => {
           refreshTrackerProtectionView(latestHeuristic);
@@ -1687,14 +2202,19 @@ async function init() {
   }
 
   const scanTab = document.getElementById("tab-scan");
+  const trackerTab = document.getElementById("tab-trackers");
   const protectTab = document.getElementById("tab-protect");
 
   if (scanTab) {
-    scanTab.addEventListener("click", () => activateView("scan"));
+    scanTab.addEventListener("click", () => activateView("scan", { user: true }));
+  }
+
+  if (trackerTab) {
+    trackerTab.addEventListener("click", () => activateView("trackers", { user: true }));
   }
 
   if (protectTab) {
-    protectTab.addEventListener("click", () => activateView("protect"));
+    protectTab.addEventListener("click", () => activateView("protect", { user: true }));
   }
 
   function initDetailsToggles() {
@@ -1714,7 +2234,6 @@ async function init() {
   }
 
   initDetailsToggles();
-  activateView("scan");
 }
 
 document.addEventListener("DOMContentLoaded", init);

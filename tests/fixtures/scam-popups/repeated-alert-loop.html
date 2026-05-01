@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fixture: repeated alert loop</title>
+  </head>
+  <body>
+    <main>
+      <h1>Loading security scan</h1>
+    </main>
+    <script>
+      for (let i = 0; i < 5; i += 1) {
+        window.alert("Please wait while this scan completes.");
+      }
+    </script>
+  </body>
+</html>

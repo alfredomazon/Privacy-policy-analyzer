@@ -6,13 +6,12 @@ import {
 } from "./lib/finalScore.js";
 import { setToolbar, setScanningState } from "./lib/iconManager.js";
 import { classifyTrackerUrl } from "./lib/trackerRegistry.js";
-
-const TOGGLE_KEY = "gpt5Enabled";
-const SERVER_URL = "https://privacy-policy-analyzer-1.onrender.com";
-const TOKEN_KEY = "gpt5ExtensionToken";
+import { buildDynamicProtectionRulesForHost } from "./lib/protectionRules.js";
 
 // Manual protection storage
 const MANUAL_SITE_RULES_KEY = "manualSiteRules";
+const MANUAL_DNR_RULE_IDS_KEY = "manualDnrRuleIds";
+const DNR_RULE_ID_START = 10000;
 
 const DEFAULT_MANUAL_RULES = {
   blockTrackers: false,
@@ -20,6 +19,7 @@ const DEFAULT_MANUAL_RULES = {
   blockIframes: false,
   removeAds: false,
   disableTrackingLinks: false,
+  blockScamPopups: false,
 };
 
 const TOOLBAR_STATE_BY_TAB = new Map();
@@ -27,6 +27,7 @@ const LAST_URL_BY_TAB = new Map();
 const SCANNING_TABS = new Set();
 const NETWORK_TRACKER_SIGNALS_BY_TAB = new Map();
 const PROTECTION_ACTIVITY_BY_TAB = new Map();
+const LAST_PROTECTION_ACTIVITY_BY_TAB = new Map();
 const MAX_NETWORK_TRACKER_SIGNALS = 80;
 const PENDING_POLICY_EVIDENCE_BY_TAB = new Map();
 const POLICY_EVIDENCE_RETRY_DELAYS = [250, 700, 1400, 2600, 4200];
@@ -177,14 +178,6 @@ function clearScanningForTab(tabId) {
   SCANNING_TABS.delete(tabId);
 }
 
-function getStoredToggleState() {
-  return chrome.storage.local.get([TOGGLE_KEY]);
-}
-
-function getStoredToken() {
-  return chrome.storage.local.get([TOKEN_KEY]);
-}
-
 function getHostnameFromUrl(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -203,6 +196,7 @@ function clearNetworkTrackerSignals(tabId) {
 
 function clearProtectionActivity(tabId) {
   PROTECTION_ACTIVITY_BY_TAB.delete(tabId);
+  LAST_PROTECTION_ACTIVITY_BY_TAB.delete(tabId);
 }
 
 function getProtectionActivity(tabId) {
@@ -212,6 +206,36 @@ function getProtectionActivity(tabId) {
     counts: { total: 0 },
     items: [],
   };
+}
+
+function hasActiveManualRules(rules = {}) {
+  return Object.values({ ...DEFAULT_MANUAL_RULES, ...(rules || {}) }).some(Boolean);
+}
+
+function filterProtectionItemsForRules(items = [], rules = {}) {
+  const merged = { ...DEFAULT_MANUAL_RULES, ...(rules || {}) };
+  const activeRules = new Set(
+    Object.entries(merged)
+      .filter(([, enabled]) => !!enabled)
+      .map(([key]) => key)
+  );
+
+  if (!activeRules.size) return [];
+
+  return items.filter((item) => {
+    const rule = String(item?.rule || "");
+    return !rule || activeRules.has(rule);
+  });
+}
+
+function countProtectionItems(items = []) {
+  return items.reduce((acc, item) => {
+    const count = Number(item.count || 1);
+    acc.total += count;
+    acc[item.kind || "resource"] =
+      (acc[item.kind || "resource"] || 0) + count;
+    return acc;
+  }, { total: 0 });
 }
 
 function enrichProtectionActivityItem(item = {}, pageHostname = "") {
@@ -242,31 +266,34 @@ function rememberProtectionActivity(tabId, tabUrl, activity = {}) {
   if (tabId == null || tabId < 0) return;
 
   const pageHostname = getHostnameFromUrl(tabUrl || LAST_URL_BY_TAB.get(tabId) || "");
-  const items = Array.isArray(activity.items)
+  const rules = { ...DEFAULT_MANUAL_RULES, ...(activity.rules || {}) };
+  const active = !!activity.active && hasActiveManualRules(rules);
+  let items = Array.isArray(activity.items)
     ? activity.items
         .map((item) => enrichProtectionActivityItem(item, pageHostname))
         .slice(0, 80)
     : [];
 
-  const counts = items.reduce((acc, item) => {
-    const count = Number(item.count || 1);
-    acc.total += count;
-    acc[item.kind || "resource"] =
-      (acc[item.kind || "resource"] || 0) + count;
-    return acc;
-  }, { total: 0 });
+  if (active && !items.length) {
+    const previous = LAST_PROTECTION_ACTIVITY_BY_TAB.get(tabId);
+    items = filterProtectionItemsForRules(previous?.items || [], rules);
+  }
 
-  PROTECTION_ACTIVITY_BY_TAB.set(tabId, {
-    active: !!activity.active,
+  const counts = countProtectionItems(items);
+  const snapshot = {
+    active,
     scanCompleted: activity.scanCompleted === true,
-    rules: { ...DEFAULT_MANUAL_RULES, ...(activity.rules || {}) },
-    counts: {
-      ...(activity.counts || {}),
-      ...counts,
-    },
+    rules,
+    counts,
     items,
     updatedAt: activity.updatedAt || Date.now(),
-  });
+  };
+
+  PROTECTION_ACTIVITY_BY_TAB.set(tabId, snapshot);
+
+  if (active && items.length) {
+    LAST_PROTECTION_ACTIVITY_BY_TAB.set(tabId, snapshot);
+  }
 }
 
 function refreshToolbarFromCachedResult(tabId, tabUrl = "", { force = false } = {}) {
@@ -399,6 +426,7 @@ async function setManualRulesForHost(hostname, rules) {
     blockIframes: !!rules.blockIframes,
     removeAds: !!rules.removeAds,
     disableTrackingLinks: !!rules.disableTrackingLinks,
+    blockScamPopups: !!rules.blockScamPopups,
   };
 
   await chrome.storage.local.set({
@@ -406,48 +434,88 @@ async function setManualRulesForHost(hostname, rules) {
   });
 }
 
-/**
- * Placeholder for DNR sync.
- * Later you can import your DNR manager and call it here.
- */
-async function syncManualProtectionRules(hostname, rules) {
-  // Example future hook:
-  // await syncDnrRulesForSite(hostname, rules);
-  return;
+async function getStoredDnrRuleIds() {
+  const res = await chrome.storage.local.get([MANUAL_DNR_RULE_IDS_KEY]);
+  return res[MANUAL_DNR_RULE_IDS_KEY] || {};
 }
 
-async function callAnalyzeServer(text, token) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+async function setStoredDnrRuleIds(value) {
+  await chrome.storage.local.set({
+    [MANUAL_DNR_RULE_IDS_KEY]: value || {},
+  });
+}
 
-  try {
-    const response = await fetch(`${SERVER_URL}/analyze`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Extension-Token": token,
-      },
-      body: JSON.stringify({ text }),
-      signal: controller.signal,
+function nextDnrRuleStart(existingMap = {}) {
+  const used = Object.values(existingMap)
+    .flat()
+    .map((value) => Number(value))
+    .filter(Number.isFinite);
+
+  if (!used.length) return DNR_RULE_ID_START;
+  return Math.max(...used) + 1;
+}
+
+async function syncManualProtectionRules(hostname, rules) {
+  if (!chrome.declarativeNetRequest?.updateDynamicRules) return;
+
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!host) return;
+
+  const existingMap = await getStoredDnrRuleIds();
+  const removeRuleIds = Array.isArray(existingMap[host])
+    ? existingMap[host]
+    : [];
+  const startId = nextDnrRuleStart(existingMap);
+  const addRules = buildDynamicProtectionRulesForHost({
+    hostname: host,
+    rules: { ...DEFAULT_MANUAL_RULES, ...(rules || {}) },
+    startId,
+  }).map(({ _filterId, ...rule }) => rule);
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds,
+    addRules,
+  });
+
+  const nextMap = { ...existingMap };
+  if (addRules.length) {
+    nextMap[host] = addRules.map((rule) => rule.id);
+  } else {
+    delete nextMap[host];
+  }
+
+  await setStoredDnrRuleIds(nextMap);
+}
+
+async function syncAllManualProtectionRules() {
+  if (!chrome.declarativeNetRequest?.updateDynamicRules) return;
+
+  const allRules = await getAllManualSiteRules();
+  const existingMap = await getStoredDnrRuleIds();
+  const removeRuleIds = Object.values(existingMap).flat();
+  const nextMap = {};
+  const addRules = [];
+  let nextId = DNR_RULE_ID_START;
+
+  for (const [hostname, rules] of Object.entries(allRules)) {
+    const built = buildDynamicProtectionRulesForHost({
+      hostname,
+      rules: { ...DEFAULT_MANUAL_RULES, ...(rules || {}) },
+      startId: nextId,
     });
 
-    const data = await response.json().catch(() => null);
+    if (!built.length) continue;
 
-    if (!response.ok) {
-      return {
-        ok: false,
-        error: data?.error || `HTTP ${response.status}`,
-        details: data,
-      };
-    }
-
-    return {
-      ok: true,
-      data,
-    };
-  } finally {
-    clearTimeout(timeoutId);
+    addRules.push(...built.map(({ _filterId, ...rule }) => rule));
+    nextMap[hostname] = built.map((rule) => rule.id);
+    nextId = Math.max(...nextMap[hostname]) + 1;
   }
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds,
+    addRules,
+  });
+  await setStoredDnrRuleIds(nextMap);
 }
 
 async function fetchLinkedPolicyDocument(url) {
@@ -591,16 +659,20 @@ if (chrome.webRequest?.onBeforeRequest) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get([TOGGLE_KEY], (res) => {
-    if (res[TOGGLE_KEY] === undefined) {
-      chrome.storage.local.set({ [TOGGLE_KEY]: false });
-    }
-  });
-
   chrome.storage.local.get([MANUAL_SITE_RULES_KEY], (res) => {
     if (res[MANUAL_SITE_RULES_KEY] === undefined) {
       chrome.storage.local.set({ [MANUAL_SITE_RULES_KEY]: {} });
     }
+  });
+
+  syncAllManualProtectionRules().catch((err) => {
+    console.error("Failed to sync protection network rules:", err);
+  });
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  syncAllManualProtectionRules().catch((err) => {
+    console.error("Failed to sync protection network rules:", err);
   });
 });
 
@@ -752,20 +824,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
-  if (msg.type === "getStatus") {
-    chrome.storage.local.get([TOGGLE_KEY], (res) => {
-      sendResponse({ enabled: !!res[TOGGLE_KEY] });
-    });
-    return true;
-  }
-
-  if (msg.type === "setStatus") {
-    chrome.storage.local.set({ [TOGGLE_KEY]: !!msg.enabled }, () => {
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-
   if (msg.type === "GET_RULES_FOR_ACTIVE_TAB") {
     (async () => {
       try {
@@ -850,56 +908,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({
           ok: false,
           error: err?.message || "Unknown error.",
-        });
-      }
-    })();
-
-    return true;
-  }
-
-  if (msg.type === "analyzePolicy") {
-    (async () => {
-      try {
-        const text = typeof msg.text === "string" ? msg.text.trim() : "";
-
-        if (!text) {
-          sendResponse({
-            ok: false,
-            error: "No policy text was provided for analysis.",
-          });
-          return;
-        }
-
-        const toggleRes = await getStoredToggleState();
-
-        if (!toggleRes[TOGGLE_KEY]) {
-          sendResponse({
-            ok: false,
-            error: "Analyzer is disabled. Turn it on first.",
-          });
-          return;
-        }
-
-        const stored = await getStoredToken();
-        const token = stored[TOKEN_KEY];
-
-        if (!token) {
-          sendResponse({
-            ok: false,
-            error: "Missing Extension Token. Paste it in the popup settings.",
-          });
-          return;
-        }
-
-        const result = await callAnalyzeServer(text, token);
-        sendResponse(result);
-      } catch (err) {
-        sendResponse({
-          ok: false,
-          error:
-            err?.name === "AbortError"
-              ? "Analysis request timed out."
-              : err?.message || String(err),
         });
       }
     })();

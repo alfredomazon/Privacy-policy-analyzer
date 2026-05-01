@@ -264,9 +264,45 @@ test("known policy registry covers common high-traffic platforms", () => {
       "https://www.tiktok.com/legal/page/us/privacy-policy/en",
     ],
     [
+      "www.youtube.com",
+      "https://policies.google.com/privacy?hl=en-US",
+    ],
+    [
+      "music.youtube.com",
+      "https://policies.google.com/privacy?hl=en-US",
+    ],
+    [
+      "www.nvidia.com",
+      "https://www.nvidia.com/en-us/about-nvidia/privacy-policy/",
+    ],
+    [
+      "www.hp.com",
+      "https://www.hp.com/us-en/privacy/ww-privacy.html",
+    ],
+    [
       "www.target.com",
       "https://www.target.com/c/target-privacy-policy/-/N-4sr7p",
     ],
+    ["www.reddit.com", "https://redditinc.com/privacy"],
+    ["discord.com", "https://discord.com/privacy"],
+    [
+      "store.steampowered.com",
+      "https://store.steampowered.com/privacy_agreement/",
+    ],
+    ["itch.io", "https://itch.io/docs/legal/privacy-policy"],
+    ["archiveofourown.org", "https://archiveofourown.org/privacy"],
+    [
+      "www.fandom.com",
+      "https://www.fandom.com/privacy-policy-2025-10-13",
+    ],
+    ["www.patreon.com", "https://privacy.patreon.com/policies/en/"],
+    [
+      "chicago.craigslist.org",
+      "https://www.craigslist.org/about/privacy.policy",
+    ],
+    ["www.coinbase.com", "https://www.coinbase.com/legal/privacy"],
+    ["9gag.com", "https://about.9gag.com/privacy"],
+    ["www.quora.com", "https://www.quora.com/about/privacy"],
   ]);
 
   for (const [host, url] of expected) {
@@ -280,6 +316,41 @@ test("real-site fixture filters search-result policy mentions", () => {
     links,
     "https://www.google.com/search?q=privacy+policy",
     "www.google.com"
+  );
+
+  assert.equal(ranked.length, 0);
+});
+
+test("ranks privacy links exposed through dynamic page data", () => {
+  const ranked = rankPolicyLinkCandidates(
+    [
+      {
+        href: "/privacy-policy",
+        text: "",
+        title: "script data",
+        source: "script",
+      },
+    ],
+    "https://dynamic.example.com/app",
+    "dynamic.example.com"
+  );
+
+  assert.equal(ranked[0]?.url, "https://dynamic.example.com/privacy-policy");
+  assert.equal(ranked[0]?.source, "script");
+});
+
+test("ignores infrastructure privacy links from security challenge pages", () => {
+  const ranked = rankPolicyLinkCandidates(
+    [
+      {
+        href: "https://www.cloudflare.com/privacypolicy/",
+        text: "Privacy",
+        title: "Performance and Security by Cloudflare",
+        inFooterOrNav: true,
+      },
+    ],
+    "https://www.fandom.com/",
+    "www.fandom.com"
   );
 
   assert.equal(ranked.length, 0);
