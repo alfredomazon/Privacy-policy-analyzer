@@ -33,6 +33,14 @@ Run the test suite:
 npm test
 ```
 
+Build a clean Chrome Web Store ZIP:
+
+```bash
+npm run package
+```
+
+The package script writes the uploadable ZIP to `dist/` with `manifest.json` at the archive root. It includes only runtime extension files and excludes tests, benchmarks, scripts, docs, `node_modules`, and other development-only files.
+
 Load the extension locally:
 
 1. Open Chrome and go to `chrome://extensions`.
@@ -41,8 +49,16 @@ Load the extension locally:
 4. Choose this project folder, the one containing `manifest.json`.
 5. Open a website and click the Evil Eye extension icon.
 
+## Credits
+
+This project was developed at Rockford University for `2026.SPRING.REG.CSCI 495.01 - Senior Seminar`.
+
+- Supervisor: Dr. Ahmed El Ouadrhiri
+- Main contributors: Alfonso Julyan Almazan and De'Angelo Strbac
+
 ## Notes
 
 - This project is a heuristic analyzer, not legal advice.
 - Scores are meant to help users notice policy and tracker patterns quickly.
 - Manual protection settings are saved per site and can change the tracker portion of the score when blocked tracker activity is the reason the page looked riskier.
+- Chrome Web Store submission copy, permission justifications, privacy disclosures, and the privacy policy draft are in `docs/`.
