@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Privacy Policy Analyzer",
+  "name": "Evil Eye Privacy Policy Analyzer",
+  "short_name": "Evil Eye",
   "version": "0.1.0",
   "description": "Local privacy policy, tracker, and protection analyzer.",
   "action": {
