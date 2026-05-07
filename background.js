@@ -17,9 +17,9 @@ const DEFAULT_MANUAL_RULES = {
   blockTrackers: false,
   blockThirdPartyScripts: false,
   blockIframes: false,
-  removeAds: false,
+  removeAds: true,
   disableTrackingLinks: false,
-  blockScamPopups: false,
+  blockScamPopups: true,
 };
 
 const TOOLBAR_STATE_BY_TAB = new Map();
@@ -31,6 +31,25 @@ const LAST_PROTECTION_ACTIVITY_BY_TAB = new Map();
 const MAX_NETWORK_TRACKER_SIGNALS = 80;
 const PENDING_POLICY_EVIDENCE_BY_TAB = new Map();
 const POLICY_EVIDENCE_RETRY_DELAYS = [250, 700, 1400, 2600, 4200];
+
+function sendTabMessageSafely(tabId, message) {
+  if (tabId == null || tabId < 0) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+
+        resolve(response || null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
 
 function sameToolbarState(a, b) {
   if (a === b) return true;
@@ -134,21 +153,17 @@ async function requestHeuristicFromTab(
 ) {
   if (tabId == null) return null;
 
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      type: "REQUEST_HEURISTIC_RESULT",
-      force,
-    });
+  const response = await sendTabMessageSafely(tabId, {
+    type: "REQUEST_HEURISTIC_RESULT",
+    force,
+  });
 
-    if (!response?.ok || !response.result) return null;
+  if (!response?.ok || !response.result) return null;
 
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    return cacheHeuristicForTab(tabId, tab?.url || "", response.result, {
-      forceToolbar,
-    });
-  } catch {
-    return null;
-  }
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  return cacheHeuristicForTab(tabId, tab?.url || "", response.result, {
+    forceToolbar,
+  });
 }
 
 function resetTabState(tabId) {
@@ -291,6 +306,10 @@ function rememberProtectionActivity(tabId, tabUrl, activity = {}) {
 
   PROTECTION_ACTIVITY_BY_TAB.set(tabId, snapshot);
 
+  if (!active) {
+    LAST_PROTECTION_ACTIVITY_BY_TAB.delete(tabId);
+  }
+
   if (active && items.length) {
     LAST_PROTECTION_ACTIVITY_BY_TAB.set(tabId, snapshot);
   }
@@ -316,16 +335,12 @@ async function notifyProtectionAfterScan(tabId, tabUrl) {
   const hostname = getHostnameFromUrl(tabUrl || "");
   if (!hostname) return;
 
-  try {
-    const rules = await getManualRulesForHost(hostname);
-    await chrome.tabs.sendMessage(tabId, {
-      type: "APPLY_PROTECTION_AFTER_SCAN",
-      hostname,
-      rules,
-    });
-  } catch {
-    // The protection content script may not be available on this page.
-  }
+  const rules = await getManualRulesForHost(hostname);
+  await sendTabMessageSafely(tabId, {
+    type: "APPLY_PROTECTION_AFTER_SCAN",
+    hostname,
+    rules,
+  });
 }
 
 function rememberPendingPolicyEvidence(tabId, payload) {
@@ -356,7 +371,7 @@ async function sendPendingPolicyEvidenceToTab(tabId, attempt = 0) {
   if (!pending) return;
 
   try {
-    const response = await chrome.tabs.sendMessage(tabId, {
+    const response = await sendTabMessageSafely(tabId, {
       type: "HIGHLIGHT_POLICY_EVIDENCE",
       ...pending,
     });
@@ -891,15 +906,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           currentWindow: true,
         });
 
-        if (tab?.id) {
-          chrome.tabs.sendMessage(tab.id, {
+        if (tab?.id != null) {
+          const mergedRules = {
+            ...DEFAULT_MANUAL_RULES,
+            ...rules,
+          };
+
+          await sendTabMessageSafely(tab.id, {
             type: "RULES_UPDATED",
             hostname,
-            rules: {
-              ...DEFAULT_MANUAL_RULES,
-              ...rules,
-            },
-          }).catch(() => {});
+            rules: mergedRules,
+          });
+
+          if (!hasActiveManualRules(mergedRules)) {
+            rememberProtectionActivity(tab.id, tab.url || "", {
+              active: false,
+              scanCompleted: true,
+              rules: mergedRules,
+              items: [],
+              updatedAt: Date.now(),
+            });
+            refreshToolbarFromCachedResult(tab.id, tab.url || "", { force: true });
+          }
         }
 
         sendResponse({ ok: true });

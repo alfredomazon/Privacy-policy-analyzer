@@ -30,6 +30,7 @@ The package script includes:
 - `content/`
 - `icons/`
 - `lib/`
+- `resources/`
 
 The package script excludes:
 
@@ -67,15 +68,11 @@ Paste these into the Developer Dashboard permission fields.
 
 ### `storage`
 
-Stores local scan cache, toolbar state, protection activity counts, and per-site protection choices in Chrome extension storage. This keeps the extension result stable across page navigation and lets users save protection settings for the current site.
+Stores local scan cache, toolbar state, protection activity counts, and per-site protection choices in Chrome extension storage. This keeps the extension result stable across page navigation and lets users save protection settings for the current site, including disabling the default safety protections if desired.
 
 ### `activeTab`
 
 Allows the extension popup to inspect and refresh the currently active tab after the user opens the popup or interacts with the extension. This supports the visible scan and protection controls for the page the user is viewing.
-
-### `scripting`
-
-Injects packaged scanner and protection helpers into pages so the extension can inspect policy links, page text, tracker signals, page fields, ads, and optional per-site protections. The extension does not inject remotely hosted scripts.
 
 ### `tabs`
 
@@ -87,7 +84,7 @@ Observes request metadata for the current site so tracker evidence and protectio
 
 ### `declarativeNetRequest`
 
-Applies local browser-supported blocking rules for user-enabled protection features, such as known tracker requests, ad-like requests, third-party scripts, and third-party frames.
+Applies local browser-supported blocking and safe empty-resource redirect rules for user-enabled protection features, such as known tracker requests, ad-like requests, third-party scripts, and third-party frames.
 
 ### `declarativeNetRequestWithHostAccess`
 
@@ -95,17 +92,17 @@ Allows host-scoped protection rules to run on the websites where the user enable
 
 ### Host permission: `<all_urls>`
 
-Lets the extension provide its core scan, tracker detector, policy discovery, and optional protection features on the websites the user visits. This broad host access is used only for the visible user-facing features described in the listing and popup.
+Lets the extension provide its core scan, tracker detector, policy discovery, default ad and scam-notification safety protections, and optional stronger protection features on the websites the user visits. This broad host access is used only for the visible user-facing features described in the listing and popup.
 
 ## 4. Single Purpose and Listing Copy
 
 ### Single purpose
 
-Evil Eye helps users understand website privacy policy risks and page tracker activity, with optional per-site protection controls, directly in the browser.
+Evil Eye helps users understand website privacy policy risks and page tracker activity, with default ad and scam-notification safety protections plus optional per-site protection controls, directly in the browser.
 
 ### Store summary
 
-Understand privacy policy risks and page tracker activity on websites you visit, with optional per-site protection.
+Understand privacy policy risks and page tracker activity, with default ad and scam-notification safety protections.
 
 ### Detailed description
 
@@ -119,7 +116,8 @@ Main features:
 - Separates routine site behavior from more intrusive or unexpected policy language.
 - Detects known tracker services, browser storage signals, third-party scripts, embedded frames, data-entry fields, and ad-like activity.
 - Explains what changed the toolbar eye score without filling the popup with technical noise.
-- Provides optional per-site protection controls for blocking known trackers, third-party scripts, third-party frames, obvious ads, tracking links, and scam-like popup behavior.
+- Starts with obvious ad cleanup and scam-notification protection on by default.
+- Provides optional per-site protection controls for blocking known trackers, third-party scripts, third-party frames, tracking links, and stronger site protections.
 
 The analyzer runs locally in your browser. It does not use a hosted analysis server, remote artificial intelligence service, advertising endpoint, or developer-operated analytics endpoint.
 
@@ -129,7 +127,7 @@ Use these disclosures to fill the Chrome Web Store privacy fields consistently w
 
 ### Data use
 
-The extension uses handled data only for extension functionality: privacy policy discovery, policy analysis, tracker detection, score display, toolbar icon updates, local caching, and optional per-site protection.
+The extension uses handled data only for extension functionality: privacy policy discovery, policy analysis, tracker detection, score display, toolbar icon updates, local caching, default safety protections, and optional per-site protection.
 
 Do not select advertising, personalization, credit-worthiness, or unrelated analytics uses.
 
@@ -158,5 +156,5 @@ The extension's analysis and protection logic is packaged with the extension. It
 Use this disclosure in the privacy policy and any required dashboard field:
 
 ```text
-The extension's use of user data adheres to the Chrome Web Store User Data Policy, including the Limited Use requirements. User data is used only to provide and improve the extension's single purpose: helping users understand website privacy policy risks and page tracker activity, with optional per-site protection.
+The extension's use of user data adheres to the Chrome Web Store User Data Policy, including the Limited Use requirements. User data is used only to provide and improve the extension's single purpose: helping users understand website privacy policy risks and page tracker activity, with default ad and scam-notification safety protections plus optional per-site protection.
 ```

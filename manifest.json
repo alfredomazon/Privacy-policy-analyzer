@@ -26,7 +26,6 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting",
     "tabs",
     "webRequest",
     "declarativeNetRequest",
@@ -53,7 +52,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["lib/*.js", "lib/**/*.js"],
+      "resources": ["lib/*.js", "lib/**/*.js", "resources/*"],
       "matches": ["<all_urls>"]
     }
   ]

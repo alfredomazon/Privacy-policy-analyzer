@@ -4,9 +4,9 @@ const DEFAULT_RULES = {
   blockTrackers: false,
   blockThirdPartyScripts: false,
   blockIframes: false,
-  removeAds: false,
+  removeAds: true,
   disableTrackingLinks: false,
-  blockScamPopups: false,
+  blockScamPopups: true,
 };
 
 let CURRENT_RULES = { ...DEFAULT_RULES };
@@ -25,6 +25,10 @@ const SCAM_POPUP_ACTIVITY_EVENT = "evil-eye-popup-guard-activity";
 
 const GENERIC_AD_SELECTORS = [
   '[data-ad]',
+  '[data-ad-unit]',
+  '[data-ad-unit-path]',
+  '[data-advertisement]',
+  '[data-google-query-id]',
   '[data-ad-slot]',
   '[data-ad-client]',
   '[aria-label*="advertisement" i]',
@@ -36,6 +40,15 @@ const GENERIC_AD_SELECTORS = [
   '[id$="-ad"]',
   '[id$="_ad"]',
   '[id*="advertisement"]',
+  '[id*="ad-slot"]',
+  '[id*="adslot"]',
+  '[id*="ad-container"]',
+  '[id*="adcontainer"]',
+  '[id*="billboard"]',
+  '[id*="leaderboard"]',
+  '[id*="mpu"]',
+  '[id*="dfp"]',
+  '[id*="gpt"]',
   '[class~="ad"]',
   '[class~="ads"]',
   '[class^="ad-"]',
@@ -43,11 +56,65 @@ const GENERIC_AD_SELECTORS = [
   '[class$="-ad"]',
   '[class*="-ad "]',
   '[class*="ad-banner"]',
+  '[class*="ad-slot"]',
+  '[class*="adslot"]',
+  '[class*="ad-container"]',
+  '[class*="adcontainer"]',
   '[class*="advertisement"]',
+  '[class*="billboard"]',
+  '[class*="leaderboard"]',
+  '[class*="commercial-unit"]',
+  '[class*="mpu"]',
+  '[class*="dfp"]',
+  '[class*="gpt"]',
   '[class*="sponsored"]',
   '[id*="sponsored"]',
   'iframe[src*="doubleclick"]',
   'iframe[src*="googlesyndication"]',
+];
+
+const FLOATING_VIDEO_SELECTORS = [
+  "video",
+  "iframe[src]",
+  '[class*="floating" i]',
+  '[class*="float" i]',
+  '[class*="sticky" i]',
+  '[class*="dock" i]',
+  '[class*="outstream" i]',
+  '[class*="video-player" i]',
+  '[class*="jwplayer" i]',
+  '[class*="vjs" i]',
+  '[class*="primis" i]',
+  '[class*="connatix" i]',
+  '[class*="teads" i]',
+  '[id*="floating" i]',
+  '[id*="sticky" i]',
+  '[id*="outstream" i]',
+  '[id*="video-player" i]',
+];
+
+const STICKY_AD_SHELL_SELECTORS = [
+  '[data-ad]',
+  '[data-ad-unit]',
+  '[data-ad-unit-path]',
+  '[data-advertisement]',
+  '[data-google-query-id]',
+  '[id*="ad" i]',
+  '[id*="advert" i]',
+  '[id*="billboard" i]',
+  '[id*="leaderboard" i]',
+  '[id*="mpu" i]',
+  '[id*="dfp" i]',
+  '[id*="gpt" i]',
+  '[class*=" ad" i]',
+  '[class^="ad" i]',
+  '[class*="advert" i]',
+  '[class*="billboard" i]',
+  '[class*="leaderboard" i]',
+  '[class*="commercial-unit" i]',
+  '[class*="mpu" i]',
+  '[class*="dfp" i]',
+  '[class*="gpt" i]',
 ];
 
 const YOUTUBE_AD_SELECTORS = [
@@ -93,6 +160,15 @@ const SCAM_POPUP_CANDIDATE_SELECTORS = [
   '[style*="position: fixed" i]',
   '[style*="position:fixed" i]',
   '[style*="z-index" i]',
+];
+
+const SCAM_INSTALL_CLICKABLE_SELECTORS = [
+  "a[href]",
+  "area[href]",
+  "button",
+  "[role='button']",
+  "input[type='button']",
+  "input[type='submit']",
 ];
 
 // ---------- helpers ----------
@@ -222,6 +298,152 @@ function isSafeAdRemovalTarget(el) {
   return !el.querySelector?.("main, header, nav, form, input, video, [role='search']");
 }
 
+function isPageChromeOrPrimaryContent(el) {
+  if (!el) return true;
+  if (el === document.documentElement || el === document.body) return true;
+
+  const tag = String(el.tagName || "").toLowerCase();
+  if (["html", "body", "main", "header", "nav", "form"].includes(tag)) {
+    return true;
+  }
+
+  return !!(
+    el.matches?.("[role='banner'], [role='navigation'], [role='main'], [role='search']") ||
+    el.querySelector?.("main, header, nav, form, [role='search']")
+  );
+}
+
+function hasCloseControl(el) {
+  return !!el?.querySelector?.(
+    [
+      'button[aria-label*="close" i]',
+      '[role="button"][aria-label*="close" i]',
+      '[title*="close" i]',
+      '[class*="close" i]',
+      '[id*="close" i]',
+    ].join(",")
+  );
+}
+
+function hasVideoContent(el) {
+  return !!(
+    el?.matches?.("video, iframe[src]") ||
+    el?.querySelector?.("video, iframe[src]")
+  );
+}
+
+function isLikelyVideoWidgetDescriptor(el) {
+  return /\b(video|player|jwplayer|vjs|outstream|float|floating|sticky|dock|primis|connatix|teads|aniview|brid|advert|ad)\b/i.test(
+    getElementDescriptor(el)
+  );
+}
+
+function isNearViewportEdge(rect) {
+  const edgePadding = 96;
+
+  return (
+    rect.right >= window.innerWidth - edgePadding ||
+    rect.bottom >= window.innerHeight - edgePadding ||
+    rect.left <= edgePadding ||
+    rect.top <= edgePadding
+  );
+}
+
+function isLikelyFloatingVideoContainer(el) {
+  if (!el || isPageChromeOrPrimaryContent(el) || !hasVideoContent(el)) {
+    return false;
+  }
+
+  const style = getComputedStyle(el);
+  if (style.display === "none" || style.visibility === "hidden") {
+    return false;
+  }
+
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 180 || rect.height < 90) return false;
+
+  const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+  const areaRatio = (rect.width * rect.height) / viewportArea;
+  const zIndex = Number.parseInt(style.zIndex || "0", 10);
+  const floating =
+    style.position === "fixed" ||
+    style.position === "sticky" ||
+    zIndex >= 1000;
+  const lowerCornerPlayer =
+    zIndex >= 100 &&
+    rect.right >= window.innerWidth - 96 &&
+    rect.bottom >= window.innerHeight - 96;
+
+  if (!floating || !isNearViewportEdge(rect) || areaRatio > 0.35) {
+    return false;
+  }
+
+  return isLikelyVideoWidgetDescriptor(el) || hasCloseControl(el) || lowerCornerPlayer;
+}
+
+function getFloatingVideoRemovalTarget(el) {
+  let node = el;
+
+  for (let depth = 0; node && depth < 7; depth += 1) {
+    if (isLikelyFloatingVideoContainer(node)) return node;
+    node = node.parentElement;
+  }
+
+  return null;
+}
+
+function isLikelyAdShellDescriptor(el) {
+  return /\b(ad|ads|advert|advertisement|sponsor|sponsored|billboard|leaderboard|mpu|dfp|gpt|google-query-id|commercial-unit)\b/i.test(
+    getElementDescriptor(el)
+  );
+}
+
+function isLikelyStickyAdShell(el) {
+  if (!el || isPageChromeOrPrimaryContent(el) || !isLikelyAdShellDescriptor(el)) {
+    return false;
+  }
+
+  const style = getComputedStyle(el);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 250 || rect.height < 40) return false;
+
+  const zIndex = Number.parseInt(style.zIndex || "0", 10);
+  const stickyOrFixed =
+    style.position === "fixed" ||
+    style.position === "sticky" ||
+    zIndex >= 1000;
+  const topWhitespaceAd =
+    rect.top <= 180 &&
+    rect.height >= 70 &&
+    rect.width >= Math.min(320, window.innerWidth * 0.5);
+
+  return stickyOrFixed || topWhitespaceAd;
+}
+
+function collapseEmptyAdAncestor(startEl) {
+  let node = startEl;
+
+  for (let depth = 0; node && depth < 3; depth += 1) {
+    if (isPageChromeOrPrimaryContent(node) || !isLikelyAdShellDescriptor(node)) {
+      break;
+    }
+
+    const text = (node.innerText || node.textContent || "").trim();
+    const hasMedia = !!node.querySelector?.("img, video, iframe, embed, object");
+    const rect = node.getBoundingClientRect();
+    const parent = node.parentElement;
+
+    if (text.length > 30 || hasMedia || rect.height < 30) {
+      break;
+    }
+
+    node.remove();
+    node = parent;
+  }
+}
+
 function isThirdParty(url) {
   try {
     const u = new URL(url, location.href);
@@ -273,8 +495,35 @@ function getElementDescriptor(el) {
   return [
     el.getAttribute?.("role") || "",
     el.getAttribute?.("aria-label") || "",
+    el.getAttribute?.("data-testid") || "",
+    el.getAttribute?.("data-ad") || "",
+    el.getAttribute?.("data-ad-unit") || "",
+    el.getAttribute?.("data-ad-unit-path") || "",
+    el.getAttribute?.("data-google-query-id") ? "google-query-id" : "",
     el.id || "",
     el.className || "",
+  ].join(" ");
+}
+
+function getClickableUrl(el) {
+  const link = el?.closest?.("a[href], area[href]");
+  if (link) return link.getAttribute("href") || "";
+
+  const form = el?.closest?.("form[action]");
+  if (form) return form.getAttribute("action") || "";
+
+  return getElementUrl(el);
+}
+
+function getClickableText(el) {
+  if (!el) return "";
+
+  return [
+    el.innerText || el.textContent || "",
+    el.getAttribute?.("aria-label") || "",
+    el.getAttribute?.("title") || "",
+    el.getAttribute?.("value") || "",
+    getElementDescriptor(el),
   ].join(" ");
 }
 
@@ -315,10 +564,14 @@ function buildActivitySnapshot() {
 
 function reportProtectionActivity() {
   try {
-    chrome.runtime.sendMessage({
+    const pending = chrome.runtime.sendMessage({
       type: "PROTECTION_ACTIVITY",
       activity: buildActivitySnapshot(),
     });
+
+    if (pending?.catch) {
+      pending.catch(() => {});
+    }
   } catch {
     // The page may be unloading or the extension context may be gone.
   }
@@ -563,6 +816,68 @@ async function removeScamPopups() {
   }
 }
 
+async function disableScamInstallLinks() {
+  const patterns = await getScamPopupPatterns();
+  if (!patterns?.classifyScamPopupSignal) return;
+
+  const selector = SCAM_INSTALL_CLICKABLE_SELECTORS.join(",");
+  for (const el of document.querySelectorAll(selector)) {
+    if (el.hasAttribute("data-evil-eye-scam-install-link")) continue;
+
+    const url = getClickableUrl(el);
+    const text = getClickableText(el);
+    const nearbyText = [
+      text,
+      el.closest?.('[role="dialog"], [aria-modal="true"], [class*="modal" i], [class*="overlay" i], [class*="popup" i]')?.innerText || "",
+    ].join(" ");
+
+    const classification = patterns.classifyScamPopupSignal({
+      text: nearbyText,
+      url,
+    });
+
+    const reason = String(classification.reason || "");
+    const shouldBlock =
+      classification.level === "likely" &&
+      /install|download|notification/.test(reason);
+
+    if (!shouldBlock) continue;
+    if (markProcessed(el, "scam-install-link")) continue;
+
+    el.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      },
+      true
+    );
+
+    el.setAttribute(
+      "title",
+      reason === "notification trap"
+        ? "Blocked suspicious notification prompt by Protect"
+        : "Blocked unwanted install prompt by Protect"
+    );
+    el.style.pointerEvents = "none";
+    el.style.opacity = "0.65";
+
+    recordProtectionActivity({
+      kind: reason === "notification trap" ? "notification-trap" : "unwanted-install",
+      action: "disabled",
+      url,
+      label:
+        reason === "notification trap"
+          ? "Suspicious notification prompt"
+          : "Unwanted install prompt",
+      rule: "blockScamPopups",
+      requestType: "click",
+      confidence: classification.level,
+      reason,
+    });
+  }
+}
+
 async function removeIframes() {
   for (const el of document.querySelectorAll("iframe[src]")) {
     const src = el.getAttribute("src");
@@ -603,6 +918,9 @@ function removeAds() {
     }
   }
 
+  removeFloatingVideoAds();
+  removeStickyAdShells();
+
   selectors.forEach((sel) => {
     document.querySelectorAll(sel).forEach((el) => {
       const target = getAdRemovalTarget(el);
@@ -610,6 +928,7 @@ function removeAds() {
       if (!isSafeAdRemovalTarget(target)) return;
       if (markProcessed(target, "removed-ad")) return;
 
+      const parent = target.parentElement;
       recordProtectionActivity({
         kind: "ad-element",
         action: "hidden",
@@ -617,8 +936,51 @@ function removeAds() {
         rule: "removeAds",
       });
       target.remove();
+      collapseEmptyAdAncestor(parent);
     });
   });
+
+  removeFloatingVideoAds();
+  removeStickyAdShells();
+}
+
+function removeFloatingVideoAds() {
+  if (isYouTubePage()) return;
+
+  for (const el of document.querySelectorAll(FLOATING_VIDEO_SELECTORS.join(","))) {
+    const target = getFloatingVideoRemovalTarget(el);
+    if (!target) continue;
+    if (markProcessed(target, "removed-floating-video")) continue;
+
+    recordProtectionActivity({
+      kind: "ad-element",
+      action: "hidden",
+      label: "Floating video player",
+      rule: "removeAds",
+      requestType: "video",
+      reason: "Fixed or sticky corner video module",
+    });
+
+    target.remove();
+  }
+}
+
+function removeStickyAdShells() {
+  for (const el of document.querySelectorAll(STICKY_AD_SHELL_SELECTORS.join(","))) {
+    if (!isLikelyStickyAdShell(el)) continue;
+    if (markProcessed(el, "removed-sticky-ad-shell")) continue;
+
+    recordProtectionActivity({
+      kind: "ad-element",
+      action: "hidden",
+      label: "Sticky ad container",
+      rule: "removeAds",
+      requestType: "element",
+      reason: "Sticky or top ad container",
+    });
+
+    el.remove();
+  }
 }
 
 async function disableTrackingLinks() {
@@ -765,6 +1127,7 @@ async function applyRules(rules, { force = false } = {}) {
   try {
     if (rules.blockScamPopups) {
       await removeScamPopups();
+      await disableScamInstallLinks();
     }
 
     if (rules.blockTrackers) {
@@ -805,6 +1168,12 @@ function startObserver() {
   });
 }
 
+function stopObserver() {
+  if (!observer) return;
+  observer.disconnect();
+  observer = null;
+}
+
 // ---------- INITIAL LOAD ----------
 async function init() {
   const hostname = getHostname();
@@ -819,6 +1188,11 @@ async function init() {
       CURRENT_RULES = { ...DEFAULT_RULES, ...(res.rules || {}) };
       syncScamPopupGuardFlag(CURRENT_RULES);
       reportProtectionActivity();
+
+      if (hasActiveRules(CURRENT_RULES)) {
+        startObserver();
+        applyRules(CURRENT_RULES, { force: true });
+      }
     }
   } catch (err) {
     console.error("ManualEnforcer init failed:", err);
@@ -830,7 +1204,14 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "RULES_UPDATED") {
     CURRENT_RULES = { ...DEFAULT_RULES, ...(msg.rules || {}) };
     syncScamPopupGuardFlag(CURRENT_RULES);
-    applyRules(CURRENT_RULES);
+
+    if (hasActiveRules(CURRENT_RULES)) {
+      startObserver();
+      applyRules(CURRENT_RULES, { force: true });
+    } else {
+      stopObserver();
+      applyRules(CURRENT_RULES, { force: true });
+    }
   }
 
   if (msg?.type === "APPLY_PROTECTION_AFTER_SCAN") {
@@ -845,4 +1226,8 @@ chrome.runtime.onMessage.addListener((msg) => {
 // ---------- RUN ----------
 setupScamPopupActivityBridge();
 syncScamPopupGuardFlag(CURRENT_RULES);
+if (hasActiveRules(CURRENT_RULES)) {
+  startObserver();
+  applyRules(CURRENT_RULES, { force: true });
+}
 init();
