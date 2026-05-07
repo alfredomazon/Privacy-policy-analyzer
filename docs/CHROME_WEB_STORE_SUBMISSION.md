@@ -70,10 +70,6 @@ Paste these into the Developer Dashboard permission fields.
 
 Stores local scan cache, toolbar state, protection activity counts, and per-site protection choices in Chrome extension storage. This keeps the extension result stable across page navigation and lets users save protection settings for the current site, including disabling the default safety protections if desired.
 
-### `activeTab`
-
-Allows the extension popup to inspect and refresh the currently active tab after the user opens the popup or interacts with the extension. This supports the visible scan and protection controls for the page the user is viewing.
-
 ### `tabs`
 
 Reads the active tab URL and tab state so the extension can associate scan results with the right page, update the toolbar icon, and avoid showing stale results after navigation.
