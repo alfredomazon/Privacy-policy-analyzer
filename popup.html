@@ -18,11 +18,16 @@
       </div>
     </div>
 
+    <div id="top-status-strip" class="top-status-strip" aria-live="polite">
+      <div id="top-eye-state" class="top-status-main top-status-blue">Ready to review this page</div>
+      <div id="top-driver-state" class="top-status-chip">Safety defaults on</div>
+    </div>
+
     <!-- View switch -->
     <div class="view-switch">
-      <button id="tab-scan" class="view-tab active" type="button">Scan</button>
-      <button id="tab-trackers" class="view-tab" type="button">Trackers</button>
-      <button id="tab-protect" class="view-tab" type="button">Protect</button>
+      <button id="tab-scan" class="view-tab active" type="button">Summary</button>
+      <button id="tab-trackers" class="view-tab" type="button">Activity</button>
+      <button id="tab-protect" class="view-tab" type="button">Protection</button>
     </div>
 
     <!-- =========================
@@ -31,18 +36,18 @@
     <div id="view-scan" class="popup-view active">
       <div id="policy-result-card" class="card">
         <div class="row-between">
-          <div class="section-title flush">Policy Detector</div>
+          <div class="section-title flush">Privacy Summary</div>
           <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
         </div>
 
         <div id="policy-summary-card" class="section-block">
-          <div class="section-label">Policy result</div>
+          <div class="section-label">Policy status</div>
           <div id="heuristic-score" class="status-text status-blue">
             Refresh the page to analyze the site policy.
           </div>
           <div id="eye-reason" class="eye-reason" hidden></div>
           <div id="tracker-driver-note" class="tracker-driver-note" hidden>
-            <span>Trackers are driving this result.</span>
+            <span>Page activity is driving this result.</span>
             <button id="tracker-driver-open" type="button">View</button>
           </div>
 
@@ -86,7 +91,7 @@
 
       <details id="policy-data-details">
         <summary>
-          <span>Other policy risks</span>
+          <span>Medium policy risks</span>
           <span class="summary-caret">Expand</span>
         </summary>
         <div class="details-content">
@@ -103,12 +108,12 @@
     <div id="view-trackers" class="popup-view">
       <div id="tracker-details" class="card tracker-page-card">
         <div class="row-between">
-          <div class="section-title flush">Tracker Detector</div>
+          <div class="section-title flush">Page Activity</div>
           <button id="tracker-refresh" class="primary" type="button">Refresh</button>
         </div>
 
         <div class="section-block">
-          <div class="section-label">Protection activity</div>
+          <div class="section-label">Tracker and protection status</div>
           <div id="tracker-summary" class="summary-box">
             No known third-party tracker services observed in this page load.
           </div>
@@ -117,7 +122,7 @@
       </div>
 
       <div class="card" id="mismatch-card">
-        <div class="section-title">Policy vs Behavior</div>
+        <div class="section-title">Policy vs Page Activity</div>
         <div id="mismatch-status" class="status-text status-blue">
           No mismatch analysis yet.
         </div>
@@ -133,16 +138,16 @@
     ========================== -->
     <div id="view-protect" class="popup-view">
       <div class="card">
-        <div class="section-title">Manual Protection</div>
+        <div class="section-title">Protection</div>
         <div class="summary-box protect-intro">
-          Choose what to block on this site. These controls are manual and do not depend on the policy detector.
+          Ad cleanup and notification-trap blocking start on for safety. Stronger site controls stay manual.
         </div>
 
         <div class="section-block">
           <div class="section-label">Current site</div>
           <div id="protect-site-label" class="link-box">Loading current site…</div>
           <div id="protect-network-chip" class="protect-network-chip" hidden>
-            Network blocking active
+            Safety defaults active
           </div>
         </div>
 
@@ -150,7 +155,7 @@
           <input type="checkbox" id="protect-enable-all" />
           <div class="protect-option-text">
             <div class="protect-option-title">Activate all protections</div>
-            <div class="protect-option-subtitle">Turns on every blocker below for this site.</div>
+            <div class="protect-option-subtitle">Turns on every blocker below for this site. Some pages may need a refresh.</div>
           </div>
         </label>
 
@@ -182,7 +187,7 @@
           <input type="checkbox" id="protect-remove-ads" />
           <div class="protect-option-text">
             <div class="protect-option-title">Remove obvious ads</div>
-            <div class="protect-option-subtitle">Hides common ad-like elements on the page.</div>
+            <div class="protect-option-subtitle">On by default. Hides common ad-like elements and floating ad players.</div>
           </div>
         </label>
 
@@ -197,8 +202,8 @@
         <label class="protect-option">
           <input type="checkbox" id="protect-block-scam-popups" />
           <div class="protect-option-text">
-            <div class="protect-option-title">Block scam pop-ups</div>
-            <div class="protect-option-subtitle">Suppresses fake virus alerts, forced popup windows, and notification traps.</div>
+            <div class="protect-option-title">Block scam pop-ups and notification traps</div>
+            <div class="protect-option-subtitle">On by default. Suppresses fake virus alerts, fake Allow prompts, and unwanted install lures.</div>
           </div>
         </label>
 
@@ -208,7 +213,7 @@
         </div>
 
         <div id="protect-status" class="status-text status-blue stacked">
-          No protection settings saved yet.
+          Safety defaults are active.
         </div>
       </div>
     </div>

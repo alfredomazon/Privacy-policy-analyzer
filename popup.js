@@ -227,16 +227,89 @@ function getTrackerRiskScore(result = {}) {
 }
 
 function getTopCountedRisk(result = {}) {
-  return sortFindingsForDisplay(getCountedRisks(result?.findings || []))[0] || null;
+  return (
+    sortFindingsForDisplay(
+      getCountedRisks(getFindingsArray(result?.findings || []))
+    )[0] || null
+  );
+}
+
+function getEyeModeLabel(theme = "blue") {
+  if (theme === "red") return "Needs attention";
+  if (theme === "yellow") return "Worth reviewing";
+  return "Looks normal";
+}
+
+function getTopStatusDriver(result = null, protectionActivity = null) {
+  if (!result) return "Safety defaults on";
+
+  const findings = getFindingsArray(result.findings || []);
+  const riskStats = getRiskStats(findings);
+  const trackerStats = getTrackerSignalDisplayStats(
+    result.trackerSignals || null,
+    protectionActivity
+  );
+  const trackerRiskScore = getTrackerRiskScore(result);
+  const protectionCount = getProtectionBlockedCount(
+    getProtectionActivityItems(protectionActivity)
+  );
+  const levelHint = String(result?.toolbarState?.levelHint || "").toLowerCase();
+
+  if (protectionCount > 0) {
+    return `${protectionCount} blocked`;
+  }
+
+  if (
+    levelHint === "behavior-risk" ||
+    (riskStats.high === 0 && trackerStats.visible && trackerRiskScore >= 24)
+  ) {
+    return "Page activity";
+  }
+
+  if (riskStats.high > 0) return "Policy finding";
+  if (riskStats.medium > 0) return "Policy concern";
+  if (trackerStats.visible) return "Page activity";
+
+  return "Safety defaults on";
+}
+
+function renderTopStatus(result = null, protectionActivity = null) {
+  const state = document.getElementById("top-eye-state");
+  const driver = document.getElementById("top-driver-state");
+  if (!state && !driver) return;
+
+  if (!result) {
+    if (state) {
+      state.className = "top-status-main top-status-blue";
+      state.textContent = "Ready to review this page";
+    }
+    if (driver) driver.textContent = "Safety defaults on";
+    return;
+  }
+
+  const theme = getPopupRiskTheme(result);
+  const score = Math.round(getToolbarScore(result));
+  const scoreText = score > 0 ? ` · ${score}/100` : "";
+
+  if (state) {
+    state.className = `top-status-main top-status-${theme}`;
+    state.textContent = `${getEyeModeLabel(theme)}${scoreText}`;
+  }
+
+  if (driver) {
+    driver.textContent = getTopStatusDriver(result, protectionActivity);
+  }
 }
 
 function buildEyeReason(result = null, protectionActivity = null) {
   if (!result) return "";
 
   const theme = getPopupRiskTheme(result);
-  const score = getToolbarScore(result);
+  const modeLabel = getEyeModeLabel(theme);
+  const score = Math.round(getToolbarScore(result));
   const scoreText = score > 0 ? ` (${score}/100)` : "";
-  const riskStats = getRiskStats(result.findings || []);
+  const findings = getFindingsArray(result.findings || []);
+  const riskStats = getRiskStats(findings);
   const topRisk = getTopCountedRisk(result);
   const trackerStats = getTrackerSignalDisplayStats(
     result.trackerSignals || null,
@@ -248,9 +321,9 @@ function buildEyeReason(result = null, protectionActivity = null) {
 
   if (theme === "blue") {
     if (protectionCount > 0) {
-      return `Blue eye${scoreText}: no major policy risk is active, and Protect has blocked page behavior after the scan.`;
+      return `${modeLabel}${scoreText}: safety protections blocked page behavior, and no major policy risk is active.`;
     }
-    return `Blue eye${scoreText}: no major policy or tracker signal is currently driving the score.`;
+    return `${modeLabel}${scoreText}: no major policy or tracker signal is driving the result.`;
   }
 
   if (
@@ -258,27 +331,29 @@ function buildEyeReason(result = null, protectionActivity = null) {
     (riskStats.high === 0 && trackerStats.visible && trackerRiskScore >= 24)
   ) {
     const protectedText = protectionCount
-      ? ` Protect blocked ${protectionCount} item${protectionCount === 1 ? "" : "s"}, so the eye reflects the reduced tracker score.`
+      ? ` Protect blocked ${protectionCount} item${protectionCount === 1 ? "" : "s"}, so this reflects what remains active.`
       : "";
-    return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: page trackers are the strongest signal, not a high-impact policy finding.${protectedText}`;
+    return `${modeLabel}${scoreText}: page activity is the strongest signal, not a high-impact policy finding.${protectedText}`;
   }
 
   if (riskStats.high > 0 && topRisk) {
-    return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: the policy highlight “${topRisk.title}” is currently driving the score.`;
+    return `${modeLabel}${scoreText}: the policy highlight “${topRisk.title}” is driving the result.`;
   }
 
   if (riskStats.medium > 0) {
-    return `Yellow eye${scoreText}: policy concerns are present, but no high-impact policy highlight is active.`;
+    return `${modeLabel}${scoreText}: policy concerns are present, but no high-impact highlight is active.`;
   }
 
   if (trackerStats.visible) {
-    return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: tracker activity is currently driving the score.`;
+    return `${modeLabel}${scoreText}: page activity is driving the result.`;
   }
 
-  return `${theme === "red" ? "Red" : "Yellow"} eye${scoreText}: the current page has enough privacy signals to raise the score.`;
+  return `${modeLabel}${scoreText}: the current page has enough privacy signals to raise the result.`;
 }
 
 function renderEyeReason(result = null, protectionActivity = null) {
+  renderTopStatus(result, protectionActivity);
+
   const el = document.getElementById("eye-reason");
   if (!el) return;
 
@@ -720,13 +795,19 @@ function appendEvidenceCard(parent, evidenceText, item, index = 0) {
 function appendEvidenceToggle(parent, item) {
   if (!parent || !Array.isArray(item?.evidence) || !item.evidence.length) return;
 
+  const getToggleLabel = (isOpen) => {
+    const suffix = item.evidence.length > 1 ? "s" : "";
+    return `${isOpen ? "Hide" : "View"} policy sentence${suffix}`;
+  };
+
   const evidenceWrap = document.createElement("div");
   evidenceWrap.className = "finding-evidence-wrap";
 
   const evidenceToggle = document.createElement("button");
   evidenceToggle.type = "button";
   evidenceToggle.className = "finding-evidence-toggle";
-  evidenceToggle.textContent = `Show quote${item.evidence.length > 1 ? "s" : ""}`;
+  evidenceToggle.textContent = getToggleLabel(false);
+  evidenceToggle.setAttribute("aria-expanded", "false");
 
   const evidenceBox = document.createElement("div");
   evidenceBox.className = "finding-evidence hidden";
@@ -738,9 +819,8 @@ function appendEvidenceToggle(parent, item) {
   evidenceToggle.addEventListener("click", () => {
     const isHidden = evidenceBox.classList.contains("hidden");
     evidenceBox.classList.toggle("hidden", !isHidden);
-    evidenceToggle.textContent = isHidden
-      ? "Hide quotes"
-      : `Show quote${item.evidence.length > 1 ? "s" : ""}`;
+    evidenceToggle.textContent = getToggleLabel(isHidden);
+    evidenceToggle.setAttribute("aria-expanded", isHidden ? "true" : "false");
   });
 
   evidenceWrap.appendChild(evidenceToggle);
@@ -1300,7 +1380,11 @@ function summarizeProtectionActivity(items = []) {
     const count = Number(item?.count || 1);
     const kind = String(item?.kind || "").toLowerCase();
 
-    if (kind === "popup-scam") {
+    if (kind === "notification-trap") {
+      acc.notificationPrompts += count;
+    } else if (kind === "unwanted-install") {
+      acc.unwantedInstalls += count;
+    } else if (kind === "popup-scam") {
       acc.scamPopups += count;
     } else if (kind === "tracking-link") {
       acc.trackingLinks += count;
@@ -1323,6 +1407,8 @@ function summarizeProtectionActivity(items = []) {
     return acc;
   }, {
     trackerRequests: 0,
+    notificationPrompts: 0,
+    unwantedInstalls: 0,
     scamPopups: 0,
     trackingLinks: 0,
     ads: 0,
@@ -1338,6 +1424,24 @@ function summarizeProtectionActivity(items = []) {
       pluralizeProtectionLabel(
         counts.trackerRequests,
         "tracker/ad request"
+      )
+    );
+  }
+
+  if (counts.notificationPrompts) {
+    parts.push(
+      pluralizeProtectionLabel(
+        counts.notificationPrompts,
+        "suspicious notification prompt"
+      )
+    );
+  }
+
+  if (counts.unwantedInstalls) {
+    parts.push(
+      pluralizeProtectionLabel(
+        counts.unwantedInstalls,
+        "unwanted install prompt"
       )
     );
   }
@@ -1390,7 +1494,14 @@ function appendProtectionActivitySummary(parent, items = []) {
 
   const context = document.createElement("div");
   context.className = "tracker-protection-context";
-  context.textContent = "Only blocked tracker behavior can lower the live score.";
+  const hasNotificationTrap = items.some((item) =>
+    ["notification-trap", "unwanted-install"].includes(
+      String(item?.kind || "").toLowerCase()
+    )
+  );
+  context.textContent = hasNotificationTrap
+    ? "Helps stop fake Allow prompts, forced installers, and scam-style browser warnings."
+    : "Blocked tracker behavior can lower the live score.";
   parent.appendChild(context);
 
   const labels = getProtectionChipLabels(items).slice(0, 5);
@@ -1448,7 +1559,7 @@ function renderTrackerSummaryBox(summary, {
 
   const name = document.createElement("div");
   name.className = "tracker-summary-name";
-  name.textContent = "Live tracker status";
+  name.textContent = "Page activity status";
   text.appendChild(name);
 
   const titleEl = document.createElement("div");
@@ -1487,7 +1598,7 @@ function renderTrackerSummaryBox(summary, {
   const context = document.createElement("div");
   context.className = "tracker-protection-context";
   context.textContent =
-    "No protection blocks were recorded for this page load.";
+    "No safety blocks were recorded for this page load.";
   summary.appendChild(context);
 }
 
@@ -1882,9 +1993,9 @@ const DEFAULT_PROTECTION_RULES = {
   blockTrackers: false,
   blockThirdPartyScripts: false,
   blockIframes: false,
-  removeAds: false,
+  removeAds: true,
   disableTrackingLinks: false,
-  blockScamPopups: false,
+  blockScamPopups: true,
 };
 
 const PROTECTION_RULE_KEYS = Object.keys(DEFAULT_PROTECTION_RULES);
@@ -1906,21 +2017,32 @@ function getProtectionEls() {
   };
 }
 
-function protectionUsesNetworkBlocking(rules = {}) {
+function protectionUsesVisibleProtection(rules = {}) {
   const merged = { ...DEFAULT_PROTECTION_RULES, ...(rules || {}) };
-  return !!(merged.blockTrackers || merged.removeAds);
+  return Object.values(merged).some(Boolean);
 }
 
 function updateProtectionNetworkChip(els, savedRules = {}) {
   if (!els.networkChip) return;
 
-  const savedActive = protectionUsesNetworkBlocking(savedRules);
+  const merged = { ...DEFAULT_PROTECTION_RULES, ...(savedRules || {}) };
+  const savedActive = protectionUsesVisibleProtection(merged);
+  const advancedActive = !!(
+    merged.blockTrackers ||
+    merged.blockThirdPartyScripts ||
+    merged.blockIframes ||
+    merged.disableTrackingLinks
+  );
 
   els.networkChip.hidden = !savedActive;
   els.networkChip.className = "protect-network-chip protect-network-chip-on";
-  els.networkChip.textContent = "Network blocking active";
+  els.networkChip.textContent = advancedActive
+    ? "Advanced protection active"
+    : "Safety defaults active";
   els.networkChip.title =
-    "Known tracker and ad requests are blocked before they load on this site.";
+    advancedActive
+      ? "One or more stronger per-site protection controls are enabled."
+      : "Obvious ad cleanup and scam-notification protection are on by default.";
 }
 
 function getProtectionInputs(els) {
@@ -2006,7 +2128,8 @@ async function loadProtectionRulesIntoPopup(els, tab) {
 
   setProtectionUi(els, rules);
   updateProtectionNetworkChip(els, rules);
-  els.status.textContent = "Manual controls are ready for this site.";
+  els.status.textContent =
+    "Safety defaults are active. Save only if you change this site's settings.";
   setProtectionActionsDisabled(els, false);
 
   return { hostname, rules };
@@ -2186,9 +2309,9 @@ async function init() {
         };
         protectionEls.status.className = "status-text status-blue";
         protectionEls.status.textContent =
-          "Protection settings reset for this site.";
+          "Safety defaults restored for this site.";
         updateProtectionNetworkChip(protectionEls, DEFAULT_PROTECTION_RULES);
-        showToast(toastContainer, "Protection reset", "info");
+        showToast(toastContainer, "Safety defaults restored", "info");
         setTimeout(() => {
           refreshTrackerProtectionView(latestHeuristic);
         }, 300);

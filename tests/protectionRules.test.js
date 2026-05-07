@@ -59,7 +59,7 @@ test("still broad-blocks unrelated third-party scripts when enabled", () => {
   assert.equal(match.severity, "medium");
 });
 
-test("builds scoped dynamic blocking rules for enabled protection toggles", () => {
+test("builds scoped dynamic protection rules for enabled protection toggles", () => {
   const rules = buildDynamicProtectionRulesForHost({
     hostname: "shop.example.com",
     rules: { blockTrackers: true, removeAds: true },
@@ -75,6 +75,52 @@ test("builds scoped dynamic blocking rules for enabled protection toggles", () =
     )
   );
   assert.ok(rules.some((rule) => rule.condition.requestDomains.includes("doubleclick.net")));
+});
+
+test("uses noop redirects for safe ad and tracker resource types", () => {
+  const rules = buildDynamicProtectionRulesForHost({
+    hostname: "shop.example.com",
+    rules: { blockTrackers: true, removeAds: true },
+    startId: 13000,
+  });
+
+  const scriptRule = rules.find(
+    (rule) =>
+      rule._filterId === "doubleclick" &&
+      rule.condition.resourceTypes.includes("script")
+  );
+  const frameRule = rules.find(
+    (rule) =>
+      rule._filterId === "doubleclick" &&
+      rule.condition.resourceTypes.includes("sub_frame")
+  );
+
+  assert.equal(scriptRule.action.type, "redirect");
+  assert.equal(scriptRule.action.redirect.extensionPath, "/resources/noop.js");
+  assert.equal(frameRule.action.type, "redirect");
+  assert.equal(frameRule.action.redirect.extensionPath, "/resources/noop-frame.html");
+});
+
+test("keeps fragile network resource types as blocks", () => {
+  const rules = buildDynamicProtectionRulesForHost({
+    hostname: "shop.example.com",
+    rules: { blockTrackers: true, removeAds: true },
+    startId: 14000,
+  });
+
+  const xhrRule = rules.find(
+    (rule) =>
+      rule._filterId === "doubleclick" &&
+      rule.condition.resourceTypes.includes("xmlhttprequest")
+  );
+  const imageRule = rules.find(
+    (rule) =>
+      rule._filterId === "doubleclick" &&
+      rule.condition.resourceTypes.includes("image")
+  );
+
+  assert.equal(xhrRule.action.type, "block");
+  assert.equal(imageRule.action.type, "block");
 });
 
 test("strips tracking parameters without disabling the link", () => {

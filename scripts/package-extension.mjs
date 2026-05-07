@@ -17,7 +17,8 @@ const runtimeFiles = [
 const runtimeDirs = [
   "content",
   "icons",
-  "lib"
+  "lib",
+  "resources"
 ];
 
 const optionalRuntimeDirs = [

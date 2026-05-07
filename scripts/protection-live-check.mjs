@@ -9,8 +9,11 @@ import {
 } from "../lib/scamPopupPatterns.js";
 
 const DEFAULT_SITES = [
+  { label: "Google Search", url: "https://www.google.com/search?q=how+to+make+a+taco", group: "normal" },
   { label: "Apple", url: "https://www.apple.com/", group: "normal" },
   { label: "Wikipedia", url: "https://www.wikipedia.org/", group: "normal" },
+  { label: "AARP", url: "https://www.aarp.org/", group: "normal/older-adults" },
+  { label: "MedlinePlus", url: "https://medlineplus.gov/", group: "normal/health" },
   { label: "Best Buy", url: "https://www.bestbuy.com/", group: "normal" },
   { label: "Walmart", url: "https://www.walmart.com/", group: "normal" },
   { label: "YouTube", url: "https://www.youtube.com/", group: "normal" },
@@ -27,6 +30,15 @@ const NETWORK_RULES = {
   removeAds: true,
   disableTrackingLinks: true,
   blockScamPopups: false,
+};
+
+const SAFETY_DEFAULT_RULES = {
+  blockTrackers: false,
+  blockThirdPartyScripts: false,
+  blockIframes: false,
+  removeAds: true,
+  disableTrackingLinks: false,
+  blockScamPopups: true,
 };
 
 const ALL_RULES = {
@@ -59,6 +71,52 @@ const SCAM_POPUP_CASES = [
     text: "Click Allow to verify you are not a robot and continue.",
     url: "https://example.test/push/continue",
     expected: true,
+  },
+  {
+    label: "Fake CAPTCHA Allow prompt",
+    text: "Tap Allow to confirm you are not a robot.",
+    url: "https://example.test/allow-notifications/verify",
+    expected: true,
+  },
+  {
+    label: "Unwanted browser installer",
+    text: "Your browser is out of date. Install Wave Browser now to continue safely.",
+    url: "https://example.test/download/wavebrowser-setup.exe",
+    expected: true,
+  },
+  {
+    label: "Fake Chrome update",
+    text: "Chrome update required. Download the setup to keep browsing.",
+    url: "https://example.test/browser-update/chrome-setup.exe",
+    expected: true,
+  },
+  {
+    label: "No-gesture notification prompt",
+    text: "Enable alerts for order updates.",
+    url: "https://example.test/orders",
+    signal: {
+      notificationRequest: true,
+      recentUserGesture: false,
+      notificationRequestCount: 1,
+    },
+    expected: true,
+  },
+  {
+    label: "Normal stock alert after click",
+    text: "Notify me when this item is back in stock.",
+    url: "https://example.test/product",
+    signal: {
+      notificationRequest: true,
+      recentUserGesture: true,
+      notificationRequestCount: 1,
+    },
+    expected: false,
+  },
+  {
+    label: "Normal Google search wording",
+    text: "Search results for how to make a taco.",
+    url: "https://www.google.com/search?q=how+to+make+a+taco",
+    expected: false,
   },
   {
     label: "Newsletter modal",
@@ -209,6 +267,11 @@ function summarizeSite(site, html, finalUrl) {
   const pageHostname = hostnameFromUrl(finalUrl || site.url);
   const requests = extractAttrUrls(html, finalUrl || site.url);
   const links = requests.filter((request) => request.linkOnly);
+  const safetyDefaultBlocks = classifyRequests(
+    requests,
+    pageHostname,
+    SAFETY_DEFAULT_RULES
+  );
   const networkBlocks = classifyRequests(requests, pageHostname, NETWORK_RULES);
   const allBlocks = classifyRequests(requests, pageHostname, ALL_RULES);
   const broadScriptBlocks = allBlocks.filter(
@@ -227,12 +290,17 @@ function summarizeSite(site, html, finalUrl) {
       .filter(Boolean)
   );
   const networkHosts = new Set(networkBlocks.map((item) => item.hostname).filter(Boolean));
+  const safetyDefaultHosts = new Set(
+    safetyDefaultBlocks.map((item) => item.hostname).filter(Boolean)
+  );
   const broadScriptHosts = groupBy(broadScriptBlocks, (item) => item.hostname)
     .slice(0, 3)
     .map((item) => `${item.key} x${item.count}`)
     .join(", ");
   const warning =
-    site.group === "normal" && broadScriptBlocks.length >= 3
+    site.group.startsWith("normal") && safetyDefaultBlocks.length >= 6
+      ? "safety-default-heavy"
+      : site.group.startsWith("normal") && broadScriptBlocks.length >= 3
       ? "broad-script-risk"
       : networkBlocks.length >= 8
         ? "heavy-network-blocking"
@@ -244,12 +312,15 @@ function summarizeSite(site, html, finalUrl) {
     host: pageHostname,
     scannedRequests: requests.filter((request) => !request.linkOnly).length,
     requestHosts: requestHosts.size,
+    safetyDefaultBlocks: safetyDefaultBlocks.length,
+    safetyDefaultHosts: safetyDefaultHosts.size,
     networkBlocks: networkBlocks.length,
     networkHosts: networkHosts.size,
     allProtectBlocks: allBlocks.length,
     broadScripts: broadScriptBlocks.length,
     broadFrames: broadFrameBlocks.length,
     cleanedLinks: cleanedLinks.length,
+    safetyDefaultTopBlocks: topLabels(safetyDefaultBlocks) || "-",
     topBlocks: topLabels(networkBlocks) || "-",
     broadScriptHosts: broadScriptHosts || "-",
     warning,
@@ -297,12 +368,15 @@ async function run() {
           host: hostnameFromUrl(fetched.url || site.url),
           scannedRequests: 0,
           requestHosts: 0,
+          safetyDefaultBlocks: 0,
+          safetyDefaultHosts: 0,
           networkBlocks: 0,
           networkHosts: 0,
           allProtectBlocks: 0,
           broadScripts: 0,
           broadFrames: 0,
           cleanedLinks: 0,
+          safetyDefaultTopBlocks: "-",
           topBlocks: "-",
           broadScriptHosts: "-",
           warning: `fetch-status-${fetched.status}`,
@@ -318,12 +392,15 @@ async function run() {
         host: hostnameFromUrl(site.url),
         scannedRequests: 0,
         requestHosts: 0,
+        safetyDefaultBlocks: 0,
+        safetyDefaultHosts: 0,
         networkBlocks: 0,
         networkHosts: 0,
         allProtectBlocks: 0,
         broadScripts: 0,
         broadFrames: 0,
         cleanedLinks: 0,
+        safetyDefaultTopBlocks: "-",
         topBlocks: "-",
         broadScriptHosts: "-",
         warning: compactText(`${error.name}: ${error.message}`),
@@ -334,14 +411,20 @@ async function run() {
   console.table(rows);
 
   const broadNormal = rows.filter(
-    (row) => row.group === "normal" && row.warning === "broad-script-risk"
+    (row) => row.group.startsWith("normal") && row.warning === "broad-script-risk"
+  );
+  const heavySafetyDefaultNormal = rows.filter(
+    (row) => row.group.startsWith("normal") && row.warning === "safety-default-heavy"
   );
   const blockedAdHeavy = rows.filter(
-    (row) => row.group !== "normal" && row.networkBlocks > 0
+    (row) => !row.group.startsWith("normal") && row.networkBlocks > 0
   );
 
   console.log(
     `\nNormal sites with broad third-party script risk: ${broadNormal.length}`
+  );
+  console.log(
+    `Normal sites with heavy safety-default blocking: ${heavySafetyDefaultNormal.length}`
   );
   console.log(
     `Ad-heavy/download sites with network blocks detected: ${blockedAdHeavy.length}`
@@ -351,6 +434,7 @@ async function run() {
     const classification = classifyScamPopupSignal({
       text: item.text,
       url: item.url,
+      ...(item.signal || {}),
     });
     const detected =
       classification.level !== "normal" ||

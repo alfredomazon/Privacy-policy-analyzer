@@ -6,6 +6,9 @@ import {
   classifyScamPopupSignal,
   textLooksLikeNotificationTrap,
   textLooksLikeScamPopup,
+  textLooksLikeTrustedNotificationRequest,
+  textLooksLikeUnwantedInstallTrap,
+  urlLooksLikeRiskyDownload,
   urlLooksLikePopupScam,
 } from "../lib/scamPopupPatterns.js";
 
@@ -63,6 +66,187 @@ test("detects notification permission traps", () => {
   assert.equal(
     textLooksLikeScamPopup("Press Allow to download the file."),
     true
+  );
+});
+
+test("detects common fake allow prompt variants", () => {
+  const cases = [
+    "Tap Allow to confirm you are not a robot.",
+    "Click Allow to watch the video.",
+    "Press Allow to claim your prize.",
+    "Allow notifications to download the file.",
+  ];
+
+  for (const text of cases) {
+    assert.equal(textLooksLikeNotificationTrap(text), true, text);
+    assert.equal(classifyScamPopupSignal({ text }).level, "likely", text);
+  }
+});
+
+test("allows ordinary user-initiated notification prompts", () => {
+  const classification = classifyScamPopupSignal({
+    text: "Notify me when this item is back in stock.",
+    notificationRequest: true,
+    recentUserGesture: true,
+    notificationRequestCount: 1,
+  });
+
+  assert.equal(classification.level, "normal");
+  assert.equal(
+    textLooksLikeTrustedNotificationRequest("Enable alerts for shipping updates."),
+    true
+  );
+});
+
+test("does not treat Pushwoosh SDK URLs as scam URLs by themselves", () => {
+  const urls = [
+    "https://cdn.pushwoosh.com/webpush/v3/pushwoosh-web-notifications.js",
+    "https://api.pushwoosh.com/json/1.3/registerDevice",
+    "https://go.pushwoosh.com/content/example",
+  ];
+
+  for (const url of urls) {
+    assert.equal(urlLooksLikePopupScam(url), false, url);
+    assert.equal(classifyScamPopupSignal({ url }).level, "normal", url);
+  }
+});
+
+test("allows normal Pushwoosh opt-in after a user action", () => {
+  const classification = classifyScamPopupSignal({
+    text: "Enable alerts for order updates powered by Pushwoosh.",
+    url: "https://cdn.pushwoosh.com/webpush/v3/pushwoosh-web-notifications.js",
+    notificationRequest: true,
+    recentUserGesture: true,
+    notificationRequestCount: 1,
+  });
+
+  assert.equal(classification.level, "normal");
+});
+
+test("still blocks Pushwoosh-powered fake allow traps", () => {
+  const classification = classifyScamPopupSignal({
+    text: "Click Allow to verify you are not a robot and continue.",
+    url: "https://cdn.pushwoosh.com/webpush/v3/pushwoosh-web-notifications.js",
+    notificationRequest: true,
+    recentUserGesture: true,
+    notificationRequestCount: 1,
+  });
+
+  assert.equal(classification.level, "likely");
+  assert.equal(classification.reason, "notification trap");
+});
+
+test("flags Pushwoosh permission requests without a user action", () => {
+  const classification = classifyScamPopupSignal({
+    text: "Enable alerts for order updates.",
+    url: "https://cdn.pushwoosh.com/webpush/v3/pushwoosh-web-notifications.js",
+    notificationRequest: true,
+    recentUserGesture: false,
+    notificationRequestCount: 1,
+  });
+
+  assert.equal(classification.level, "suspicious");
+  assert.equal(classification.reason, "notification prompt without user action");
+});
+
+test("does not allow trusted notification wording without a user action", () => {
+  const classification = classifyScamPopupSignal({
+    text: "Notify me when this item is back in stock.",
+    notificationRequest: true,
+    recentUserGesture: false,
+    notificationRequestCount: 1,
+  });
+
+  assert.equal(classification.level, "suspicious");
+  assert.equal(classification.reason, "notification prompt without user action");
+});
+
+test("blocks notification prompts without a user action or repeated attempts", () => {
+  assert.equal(
+    classifyScamPopupSignal({
+      text: "This site wants to show notifications.",
+      notificationRequest: true,
+      recentUserGesture: false,
+      notificationRequestCount: 1,
+    }).level,
+    "suspicious"
+  );
+
+  assert.equal(
+    classifyScamPopupSignal({
+      text: "This site wants to show notifications.",
+      notificationRequest: true,
+      recentUserGesture: true,
+      notificationRequestCount: 3,
+    }).level,
+    "likely"
+  );
+});
+
+test("detects unwanted browser install lures", () => {
+  const text =
+    "Your browser is out of date. Install Wave Browser now to continue safely.";
+
+  assert.equal(textLooksLikeUnwantedInstallTrap(text), true);
+  assert.equal(textLooksLikeScamPopup(text), true);
+  assert.equal(
+    classifyScamPopupSignal({
+      text,
+      url: "https://example.test/download/wavebrowser-setup.exe",
+    }).reason,
+    "unwanted install prompt"
+  );
+  assert.equal(
+    urlLooksLikeRiskyDownload("https://example.test/download/wavebrowser-setup.exe"),
+    true
+  );
+});
+
+test("detects deceptive update and extension install lures", () => {
+  const cases = [
+    "Critical update required. Run installer to continue.",
+    "Chrome update required. Download the setup to keep browsing.",
+    "Install extension to unlock secure browser search.",
+    "Video player update required. Install now to watch.",
+  ];
+
+  for (const text of cases) {
+    assert.equal(textLooksLikeUnwantedInstallTrap(text), true, text);
+    assert.equal(classifyScamPopupSignal({ text }).level, "likely", text);
+  }
+});
+
+test("keeps risky download links suspicious unless paired with scam context", () => {
+  assert.equal(
+    classifyScamPopupSignal({
+      url: "https://example.test/files/setup.exe",
+    }).level,
+    "suspicious"
+  );
+  assert.equal(
+    classifyScamPopupSignal({
+      text: "Critical warning. Browser is locked.",
+      url: "https://example.test/files/setup.exe",
+      forcedPopup: true,
+    }).level,
+    "likely"
+  );
+});
+
+test("does not treat normal downloads as unwanted installs by text alone", () => {
+  assert.equal(
+    classifyScamPopupSignal({
+      text: "Download the monthly product catalog.",
+      url: "https://example.test/catalog.pdf",
+    }).level,
+    "normal"
+  );
+  assert.equal(
+    classifyScamPopupSignal({
+      text: "Download the official app from the app store.",
+      url: "https://example.test/app",
+    }).level,
+    "normal"
   );
 });
 

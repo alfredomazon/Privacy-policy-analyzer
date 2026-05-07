@@ -13,7 +13,9 @@ The extension runs its analysis in the browser. It does not require a hosted ana
 - Separates ordinary merchant behavior from more concerning policy language so routine checkout, account, payment, and service-delivery language does not overfire as high impact.
 - Detects page-level tracker signals from known services, network requests, browser storage, data-entry fields, ads, third-party scripts, and embedded frames.
 - Updates the toolbar eye and popup theme from the combined policy and tracker result.
-- Includes manual protection controls for the current site, including tracker blocking, third-party script blocking, third-party iframe blocking, obvious ad removal, and tracking-link disabling.
+- Starts with safety defaults for obvious ad cleanup, scam notification prompt blocking, and unwanted install-lure blocking.
+- Includes manual protection controls for the current site, including tracker blocking, third-party script blocking, third-party iframe blocking, stronger ad removal, tracking-link disabling, scam notification prompt blocking, and unwanted install-lure blocking.
+- Uses conservative empty-resource redirects for some blocked scripts, styles, and frames so safe ad/tracker requests can fail quietly without breaking more of the page than necessary.
 
 ## How It Works
 

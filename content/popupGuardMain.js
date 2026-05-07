@@ -49,6 +49,36 @@
     "captcha",
     "prize",
   ];
+  const trustedNotificationContextTerms = [
+    "notify me",
+    "enable alerts",
+    "price alert",
+    "stock alert",
+    "order updates",
+    "shipping updates",
+    "breaking news alerts",
+  ];
+  const unwantedInstallTerms = [
+    "wave browser",
+    "wavebrowser",
+    "browser update",
+    "chrome update",
+    "critical update",
+    "required update",
+    "recommended browser",
+    "secure browser",
+    "your browser is out of date",
+    "browser is out of date",
+    "install extension",
+    "add extension",
+    "download manager",
+    "run installer",
+    "video player update",
+    "codec update",
+    "flash player",
+    "search manager",
+    "browser assistant",
+  ];
   const popupUrlTerms = [
     "security-warning",
     "virus",
@@ -56,20 +86,31 @@
     "tech-support",
     "support-alert",
     "browser-lock",
-    "push",
-    "notification",
     "popunder",
     "popup",
   ];
   const phoneNumberRe =
     /(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/;
+  const installActionRe =
+    /\b(?:download|install|setup|run|open|update|add|allow|enable)\b/i;
+  const riskyDownloadExtensionRe =
+    /\.(?:exe|msi|dmg|pkg|scr|bat|cmd|vbs|ps1|crx|xpi)(?:[?#]|$)/i;
+  const suspiciousNotificationUrlRe =
+    /(?:allow[-_/]?notifications?|notification[-_/]?(?:trap|scam|alert|virus|warning)|push[-_/]?(?:trap|scam|alert|virus|warning|continue|verify|prize))/i;
 
   let lastGestureAt = 0;
   let dialogWindowStartedAt = 0;
   let dialogCount = 0;
+  let notificationRequestCount = 0;
 
   function enabled() {
     return document.documentElement?.getAttribute(ENABLED_ATTR) === "1";
+  }
+
+  try {
+    document.documentElement?.setAttribute(ENABLED_ATTR, "1");
+  } catch {
+    // If a page blocks early document access, the isolated enforcer will retry.
   }
 
   function normalizeText(value = "") {
@@ -107,6 +148,25 @@
     return asksForAllow && hasPurpose;
   }
 
+  function looksLikeTrustedNotificationRequest(text = "") {
+    const lower = normalizeText(text);
+    return trustedNotificationContextTerms.some((term) =>
+      lower.includes(term)
+    );
+  }
+
+  function looksLikeUnwantedInstallTrap(text = "") {
+    const lower = normalizeText(text);
+    if (!lower) return false;
+
+    const hasInstallAction = installActionRe.test(lower);
+    const hasInstallTrap = unwantedInstallTerms.some((term) =>
+      lower.includes(term)
+    );
+
+    return hasInstallAction && hasInstallTrap;
+  }
+
   function looksLikeScamText(text = "") {
     const lower = normalizeText(text);
     if (!lower) return false;
@@ -115,6 +175,7 @@
     const hasPhone = phoneNumberRe.test(lower);
     return (
       looksLikeNotificationTrap(lower) ||
+      looksLikeUnwantedInstallTrap(lower) ||
       (hasPhone && terms >= 1) ||
       terms >= 3
     );
@@ -122,7 +183,98 @@
 
   function looksLikeSuspiciousPopupUrl(rawUrl = "") {
     const lower = String(rawUrl || "").toLowerCase();
-    return popupUrlTerms.some((term) => lower.includes(term));
+    return (
+      popupUrlTerms.some((term) => lower.includes(term)) ||
+      suspiciousNotificationUrlRe.test(lower)
+    );
+  }
+
+  function looksLikeRiskyDownloadUrl(rawUrl = "") {
+    const lower = String(rawUrl || "").toLowerCase();
+    if (!lower) return false;
+
+    return (
+      riskyDownloadExtensionRe.test(lower) ||
+      /(?:wavebrowser|wave-browser|browser-update|chrome-update|setup|installer|download-manager)/i.test(
+        lower
+      )
+    );
+  }
+
+  function getElementText(el) {
+    if (!el) return "";
+
+    return [
+      el.innerText || el.textContent || "",
+      el.getAttribute?.("aria-label") || "",
+      el.getAttribute?.("title") || "",
+      el.getAttribute?.("value") || "",
+      el.id || "",
+      el.className || "",
+    ].join(" ");
+  }
+
+  function isVisible(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+
+    const style = window.getComputedStyle?.(el);
+    if (
+      style &&
+      (style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.opacity === "0")
+    ) {
+      return false;
+    }
+
+    const rect = el.getBoundingClientRect();
+    return rect.width > 1 && rect.height > 1;
+  }
+
+  function getNotificationContextText() {
+    const selectors = [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[class*="notification" i]',
+      '[class*="captcha" i]',
+      '[class*="verify" i]',
+      '[class*="download" i]',
+      '[class*="install" i]',
+      '[class*="modal" i]',
+      '[class*="overlay" i]',
+      '[class*="popup" i]',
+      '[id*="notification" i]',
+      '[id*="captcha" i]',
+      '[id*="verify" i]',
+      '[id*="download" i]',
+      '[id*="install" i]',
+      '[id*="modal" i]',
+      '[id*="overlay" i]',
+      '[id*="popup" i]',
+    ];
+
+    const pieces = [];
+    for (const el of document.querySelectorAll(selectors.join(","))) {
+      if (!isVisible(el)) continue;
+      const text = normalizeText(getElementText(el));
+      if (text) pieces.push(text.slice(0, 800));
+      if (pieces.length >= 4) break;
+    }
+
+    const bodyText = normalizeText(document.body?.innerText || "");
+    if (bodyText) pieces.push(bodyText.slice(0, 1600));
+
+    return pieces.join(" ");
+  }
+
+  function getClickableUrl(el) {
+    const link = el?.closest?.("a[href], area[href]");
+    if (link) return link.href || link.getAttribute("href") || "";
+
+    const form = el?.closest?.("form[action]");
+    if (form) return form.action || form.getAttribute("action") || "";
+
+    return "";
   }
 
   function classifyPopupSignal({
@@ -130,19 +282,72 @@
     url = "",
     forcedPopup = false,
     notificationRequest = false,
+    recentUserGesture = false,
+    notificationRequestCount: requestCount = 0,
     dialogCount: count = 0,
   } = {}) {
     const lower = normalizeText(text);
     const terms = countTerms(lower);
     const hasPhone = phoneNumberRe.test(lower);
     const notificationTrap = looksLikeNotificationTrap(lower);
+    const trustedNotification = looksLikeTrustedNotificationRequest(lower);
+    const unwantedInstallTrap = looksLikeUnwantedInstallTrap(lower);
     const suspiciousUrl = looksLikeSuspiciousPopupUrl(url);
+    const riskyDownload = looksLikeRiskyDownloadUrl(url);
 
-    if (notificationRequest || notificationTrap) {
+    if (notificationRequest && (notificationTrap || unwantedInstallTrap)) {
       return {
         level: "likely",
         label: "Likely scam",
         reason: "notification trap",
+      };
+    }
+
+    if (notificationRequest && requestCount > 2) {
+      return {
+        level: "likely",
+        label: "Likely scam",
+        reason: "repeated notification prompt",
+      };
+    }
+
+    if (notificationRequest && !recentUserGesture) {
+      return {
+        level: "suspicious",
+        label: "Suspicious notification",
+        reason: "notification prompt without user action",
+      };
+    }
+
+    if (notificationRequest && trustedNotification) {
+      return {
+        level: "normal",
+        label: "Normal popup",
+        reason: "",
+      };
+    }
+
+    if (notificationTrap) {
+      return {
+        level: "likely",
+        label: "Likely scam",
+        reason: "notification trap",
+      };
+    }
+
+    if (unwantedInstallTrap) {
+      return {
+        level: "likely",
+        label: "Likely scam",
+        reason: "unwanted install prompt",
+      };
+    }
+
+    if (riskyDownload && (forcedPopup || terms >= 1 || suspiciousUrl)) {
+      return {
+        level: "likely",
+        label: "Likely scam",
+        reason: "risky download prompt",
       };
     }
 
@@ -170,17 +375,25 @@
       };
     }
 
-    if (suspiciousUrl || forcedPopup || count > MAX_DIALOGS_PER_WINDOW || terms > 0) {
+    if (
+      suspiciousUrl ||
+      riskyDownload ||
+      forcedPopup ||
+      count > MAX_DIALOGS_PER_WINDOW ||
+      terms > 0
+    ) {
       return {
         level: "suspicious",
         label: "Suspicious popup",
         reason: suspiciousUrl
           ? "suspicious popup url"
-          : forcedPopup
-            ? "forced popup window"
-            : count > MAX_DIALOGS_PER_WINDOW
-              ? "repeated dialog loop"
-              : "scare wording",
+          : riskyDownload
+            ? "risky download link"
+            : forcedPopup
+              ? "forced popup window"
+              : count > MAX_DIALOGS_PER_WINDOW
+                ? "repeated dialog loop"
+                : "scare wording",
       };
     }
 
@@ -232,6 +445,58 @@
     };
   }
 
+  window.addEventListener(
+    "click",
+    (event) => {
+      if (!enabled()) return;
+
+      const target = event.target?.closest?.(
+        [
+          "a[href]",
+          "area[href]",
+          "button",
+          "[role='button']",
+          "input[type='button']",
+          "input[type='submit']",
+        ].join(",")
+      );
+      if (!target) return;
+
+      const url = getClickableUrl(target);
+      const text = `${getElementText(target)} ${getNotificationContextText()}`;
+      const classification = classifyPopupSignal({
+        text,
+        url,
+        forcedPopup: event.isTrusted === false,
+        recentUserGesture: event.isTrusted !== false,
+      });
+
+      if (
+        classification.level === "likely" &&
+        /install|download|notification/.test(classification.reason || "")
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        report({
+          kind:
+            classification.reason === "notification trap"
+              ? "notification-trap"
+              : "unwanted-install",
+          action: "blocked",
+          label:
+            classification.reason === "notification trap"
+              ? "Suspicious notification prompt"
+              : "Unwanted install prompt",
+          confidence: classification.level,
+          reason: classification.reason,
+          url: String(url || ""),
+          requestType: "click",
+        });
+      }
+    },
+    true
+  );
+
   function classifyDialog(message = "") {
     if (!enabled()) {
       return {
@@ -249,6 +514,25 @@
 
     dialogCount += 1;
     return classifyPopupSignal({ text: message, dialogCount });
+  }
+
+  function classifyPageLeaveTrap() {
+    const text = getNotificationContextText();
+    const classification = classifyPopupSignal({
+      text,
+      url: location.href,
+    });
+
+    if (classification.level !== "likely") return null;
+    if (
+      !/fake|support|virus|warning|notification|install|download|risky|scam/i.test(
+        classification.reason || ""
+      )
+    ) {
+      return null;
+    }
+
+    return classification;
   }
 
   const nativeAlert = window.alert?.bind(window);
@@ -318,27 +602,35 @@
 
     window.Notification.requestPermission = function guardedPermission(callback) {
       if (enabled()) {
+        notificationRequestCount += 1;
+        const contextText = getNotificationContextText();
         const classification = classifyPopupSignal({
           notificationRequest: true,
-        });
-        report({
-          kind: "popup-scam",
-          action: "blocked",
-          label: classification.label,
-          confidence: classification.level,
-          reason: classification.reason,
-          requestType: "notification",
+          text: contextText,
+          recentUserGesture: hasRecentGesture(),
+          notificationRequestCount,
         });
 
-        if (typeof callback === "function") {
-          try {
-            callback("denied");
-          } catch {
-            // Ignore page callback errors.
+        if (classification.level !== "normal") {
+          report({
+            kind: "notification-trap",
+            action: "blocked",
+            label: classification.label,
+            confidence: classification.level,
+            reason: classification.reason,
+            requestType: "notification",
+          });
+
+          if (typeof callback === "function") {
+            try {
+              callback("denied");
+            } catch {
+              // Ignore page callback errors.
+            }
           }
-        }
 
-        return Promise.resolve("denied");
+          return Promise.resolve("denied");
+        }
       }
 
       return nativeRequestPermission(callback);
@@ -350,14 +642,16 @@
     (event) => {
       if (!enabled()) return;
 
+      const classification = classifyPageLeaveTrap();
+      if (!classification) return;
+
       event.stopImmediatePropagation();
-      event.returnValue = undefined;
       report({
         kind: "popup-scam",
         action: "blocked",
-        label: "Suspicious popup",
-        confidence: "suspicious",
-        reason: "page-leave trap",
+        label: `${classification.label} page-leave trap`,
+        confidence: classification.level,
+        reason: classification.reason,
         requestType: "beforeunload",
       });
     },
