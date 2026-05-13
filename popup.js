@@ -240,67 +240,6 @@ function getEyeModeLabel(theme = "blue") {
   return "Looks normal";
 }
 
-function getTopStatusDriver(result = null, protectionActivity = null) {
-  if (!result) return "Safety defaults on";
-
-  const findings = getFindingsArray(result.findings || []);
-  const riskStats = getRiskStats(findings);
-  const trackerStats = getTrackerSignalDisplayStats(
-    result.trackerSignals || null,
-    protectionActivity
-  );
-  const trackerRiskScore = getTrackerRiskScore(result);
-  const protectionCount = getProtectionBlockedCount(
-    getProtectionActivityItems(protectionActivity)
-  );
-  const levelHint = String(result?.toolbarState?.levelHint || "").toLowerCase();
-
-  if (protectionCount > 0) {
-    return `${protectionCount} blocked`;
-  }
-
-  if (
-    levelHint === "behavior-risk" ||
-    (riskStats.high === 0 && trackerStats.visible && trackerRiskScore >= 24)
-  ) {
-    return "Page activity";
-  }
-
-  if (riskStats.high > 0) return "Policy finding";
-  if (riskStats.medium > 0) return "Policy concern";
-  if (trackerStats.visible) return "Page activity";
-
-  return "Safety defaults on";
-}
-
-function renderTopStatus(result = null, protectionActivity = null) {
-  const state = document.getElementById("top-eye-state");
-  const driver = document.getElementById("top-driver-state");
-  if (!state && !driver) return;
-
-  if (!result) {
-    if (state) {
-      state.className = "top-status-main top-status-blue";
-      state.textContent = "Ready to review this page";
-    }
-    if (driver) driver.textContent = "Safety defaults on";
-    return;
-  }
-
-  const theme = getPopupRiskTheme(result);
-  const score = Math.round(getToolbarScore(result));
-  const scoreText = score > 0 ? ` · ${score}/100` : "";
-
-  if (state) {
-    state.className = `top-status-main top-status-${theme}`;
-    state.textContent = `${getEyeModeLabel(theme)}${scoreText}`;
-  }
-
-  if (driver) {
-    driver.textContent = getTopStatusDriver(result, protectionActivity);
-  }
-}
-
 function buildEyeReason(result = null, protectionActivity = null) {
   if (!result) return "";
 
@@ -352,8 +291,6 @@ function buildEyeReason(result = null, protectionActivity = null) {
 }
 
 function renderEyeReason(result = null, protectionActivity = null) {
-  renderTopStatus(result, protectionActivity);
-
   const el = document.getElementById("eye-reason");
   if (!el) return;
 
