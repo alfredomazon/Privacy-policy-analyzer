@@ -18,7 +18,7 @@ Run:
 npm run package
 ```
 
-Upload the ZIP written to `dist/evil-eye-privacy-policy-analyzer-0.1.0.zip`.
+Upload the ZIP written to `dist/evil-eye-privacy-policy-analyzer-0.1.1.zip`.
 
 The package script includes:
 
