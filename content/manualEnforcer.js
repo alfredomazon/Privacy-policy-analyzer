@@ -125,19 +125,10 @@ const YOUTUBE_AD_SELECTORS = [
   "ytd-companion-slot-renderer",
   "ytd-in-feed-ad-layout-renderer",
   "ytd-ad-shelf-renderer",
-  "ytd-player-legacy-desktop-watch-ads-renderer",
   "ytd-rich-item-renderer ytd-ad-slot-renderer",
   "ytd-rich-section-renderer ytd-ad-slot-renderer",
   "ytd-video-renderer ytd-ad-slot-renderer",
-  "#player-ads",
   "#masthead-ad",
-  ".ytp-ad-module",
-  ".ytp-ad-overlay-container",
-  ".ytp-ad-player-overlay",
-  ".ytp-ad-text-overlay",
-  ".ytp-ad-image-overlay",
-  ".ytp-ad-survey",
-  ".video-ads",
 ];
 
 const YOUTUBE_SKIP_AD_SELECTORS = [
@@ -183,6 +174,10 @@ function getHostname() {
 function isYouTubePage() {
   const host = getHostname();
   return host === "youtube.com" || host.endsWith(".youtube.com");
+}
+
+function shouldUseYouTubeCompatibilityMode() {
+  return isYouTubePage();
 }
 
 function isEmailAppPage() {
@@ -295,6 +290,22 @@ function containsCriticalYouTubeElement(el) {
       "#movie_player",
       ".html5-video-player",
       "video",
+    ].join(",")
+  );
+}
+
+function isInsideYouTubePlayer(el) {
+  if (!el || !isYouTubePage()) return false;
+
+  return !!el.closest?.(
+    [
+      "#movie_player",
+      ".html5-video-player",
+      "ytd-player",
+      "#player",
+      "#player-container",
+      "#player-container-outer",
+      "#player-theater-container",
     ].join(",")
   );
 }
@@ -705,7 +716,7 @@ function syncScamPopupGuardFlag(rules = CURRENT_RULES) {
     return;
   }
 
-  if (rules.blockScamPopups) {
+  if (rules.blockScamPopups && !shouldUseYouTubeCompatibilityMode()) {
     root.setAttribute(SCAM_POPUP_GUARD_ATTR, "1");
   } else {
     root.removeAttribute(SCAM_POPUP_GUARD_ATTR);
@@ -940,7 +951,11 @@ async function removeIframes() {
 }
 
 function removeAds() {
-  if (isEmailAppPage() || isYouTubePage()) return;
+  if (isEmailAppPage()) return;
+  if (isYouTubePage()) {
+    removeYouTubeAds();
+    return;
+  }
 
   const selectors = GENERIC_AD_SELECTORS;
 
@@ -968,6 +983,40 @@ function removeAds() {
 
   removeFloatingVideoAds();
   removeStickyAdShells();
+}
+
+function removeYouTubeAds() {
+  for (const button of document.querySelectorAll(YOUTUBE_SKIP_AD_SELECTORS.join(","))) {
+    if (button.disabled || button.getAttribute("aria-disabled") === "true") continue;
+    if (markProcessed(button, "skipped-youtube-ad")) continue;
+
+    button.click();
+    recordProtectionActivity({
+      kind: "ad-element",
+      action: "clicked",
+      label: "YouTube skip ad button",
+      rule: "removeAds",
+    });
+  }
+
+  for (const selector of YOUTUBE_AD_SELECTORS) {
+    for (const el of document.querySelectorAll(selector)) {
+      if (isInsideYouTubePlayer(el)) continue;
+
+      const target = getYouTubeAdRemovalTarget(el);
+      if (!isSafeAdRemovalTarget(target)) continue;
+      if (isInsideYouTubePlayer(target)) continue;
+      if (markProcessed(target, "removed-youtube-ad")) continue;
+
+      recordProtectionActivity({
+        kind: "ad-element",
+        action: "hidden",
+        label: "YouTube page ad element",
+        rule: "removeAds",
+      });
+      target.remove();
+    }
+  }
 }
 
 function removeFloatingVideoAds() {
@@ -1142,6 +1191,7 @@ async function removeThirdPartyScripts() {
 // ---------- APPLY RULES ----------
 async function applyRules(rules, { force = false } = {}) {
   if (!rules) return;
+
   if (!hasActiveRules(rules)) {
     ACTIVITY_ITEMS.clear();
     reportProtectionActivity();
@@ -1157,6 +1207,13 @@ async function applyRules(rules, { force = false } = {}) {
   applyInProgress = true;
 
   try {
+    if (shouldUseYouTubeCompatibilityMode()) {
+      if (rules.removeAds) {
+        removeYouTubeAds();
+      }
+      return;
+    }
+
     if (rules.blockScamPopups) {
       await removeScamPopups();
       await disableScamInstallLinks();
@@ -1188,6 +1245,11 @@ async function applyRules(rules, { force = false } = {}) {
 }
 
 function startObserver() {
+  if (shouldUseYouTubeCompatibilityMode() && !CURRENT_RULES.removeAds) {
+    stopObserver();
+    return;
+  }
+
   if (observer) observer.disconnect();
 
   observer = new MutationObserver(() => {
