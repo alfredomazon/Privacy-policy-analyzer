@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildDynamicProtectionRulesForHost,
   classifyProtectionRequest,
+  getNetworkProtectionCompatibility,
   sanitizeTrackingUrl,
 } from "../lib/protectionRules.js";
 
@@ -34,6 +35,40 @@ test("does not classify YouTube core playback resources", () => {
   });
 
   assert.equal(match, null);
+});
+
+test("does not build fragile network rules for YouTube", () => {
+  const compatibility = getNetworkProtectionCompatibility("www.youtube.com");
+  const rules = buildDynamicProtectionRulesForHost({
+    hostname: "www.youtube.com",
+    rules: {
+      blockTrackers: true,
+      blockThirdPartyScripts: true,
+      blockIframes: true,
+      removeAds: true,
+    },
+  });
+
+  assert.equal(compatibility.compatible, false);
+  assert.equal(compatibility.reason, "streaming-video");
+  assert.deepEqual(rules, []);
+});
+
+test("does not build fragile network rules for email apps", () => {
+  const compatibility = getNetworkProtectionCompatibility("mail.google.com");
+  const rules = buildDynamicProtectionRulesForHost({
+    hostname: "mail.google.com",
+    rules: {
+      blockTrackers: true,
+      blockThirdPartyScripts: true,
+      blockIframes: true,
+      removeAds: true,
+    },
+  });
+
+  assert.equal(compatibility.compatible, false);
+  assert.equal(compatibility.reason, "email-app");
+  assert.deepEqual(rules, []);
 });
 
 test("does not broad-block branded first-party asset domains", () => {
@@ -141,4 +176,17 @@ test("unwraps simple outbound redirect links", () => {
   assert.equal(cleaned.changed, true);
   assert.equal(cleaned.unwrapped, true);
   assert.equal(cleaned.url, "https://target.example/page?id=1");
+});
+
+test("leaves email links untouched when sanitizing tracking links", () => {
+  const cleaned = sanitizeTrackingUrl(
+    "mailto:person@example.com?subject=Hello&utm_source=newsletter",
+    "https://example.com/"
+  );
+
+  assert.equal(cleaned.changed, false);
+  assert.equal(
+    cleaned.url,
+    "mailto:person@example.com?subject=Hello&utm_source=newsletter"
+  );
 });

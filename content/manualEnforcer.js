@@ -125,19 +125,10 @@ const YOUTUBE_AD_SELECTORS = [
   "ytd-companion-slot-renderer",
   "ytd-in-feed-ad-layout-renderer",
   "ytd-ad-shelf-renderer",
-  "ytd-player-legacy-desktop-watch-ads-renderer",
   "ytd-rich-item-renderer ytd-ad-slot-renderer",
   "ytd-rich-section-renderer ytd-ad-slot-renderer",
   "ytd-video-renderer ytd-ad-slot-renderer",
-  "#player-ads",
   "#masthead-ad",
-  ".ytp-ad-module",
-  ".ytp-ad-overlay-container",
-  ".ytp-ad-player-overlay",
-  ".ytp-ad-text-overlay",
-  ".ytp-ad-image-overlay",
-  ".ytp-ad-survey",
-  ".video-ads",
 ];
 
 const YOUTUBE_SKIP_AD_SELECTORS = [
@@ -185,6 +176,31 @@ function isYouTubePage() {
   return host === "youtube.com" || host.endsWith(".youtube.com");
 }
 
+function shouldUseYouTubeCompatibilityMode() {
+  return isYouTubePage();
+}
+
+function isEmailAppPage() {
+  const host = getHostname();
+  return (
+    host === "mail.google.com" ||
+    host === "gmail.com" ||
+    host.endsWith(".gmail.com") ||
+    host === "outlook.live.com" ||
+    host === "outlook.office.com" ||
+    host === "outlook.office365.com" ||
+    host === "mail.live.com" ||
+    host === "mail.yahoo.com" ||
+    host === "mail.proton.me" ||
+    host === "proton.me" ||
+    host.endsWith(".proton.me") ||
+    host === "protonmail.com" ||
+    host.endsWith(".protonmail.com") ||
+    host === "icloud.com" ||
+    host.endsWith(".icloud.com")
+  );
+}
+
 function isYouTubeCoreResource(url) {
   if (!isYouTubePage()) return false;
 
@@ -203,6 +219,23 @@ function isYouTubeCoreResource(url) {
     host === "ggpht.com" ||
     host.endsWith(".ggpht.com")
   );
+}
+
+function isUserActionProtocolUrl(rawUrl = "") {
+  return /^(mailto|tel|sms|facetime|imessage|webcal):/i.test(
+    String(rawUrl || "").trim()
+  );
+}
+
+function isHttpLikeUrl(rawUrl = "") {
+  if (isUserActionProtocolUrl(rawUrl)) return false;
+
+  try {
+    const parsed = new URL(rawUrl, location.href);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function isCriticalYouTubeElement(el) {
@@ -257,6 +290,22 @@ function containsCriticalYouTubeElement(el) {
       "#movie_player",
       ".html5-video-player",
       "video",
+    ].join(",")
+  );
+}
+
+function isInsideYouTubePlayer(el) {
+  if (!el || !isYouTubePage()) return false;
+
+  return !!el.closest?.(
+    [
+      "#movie_player",
+      ".html5-video-player",
+      "ytd-player",
+      "#player",
+      "#player-container",
+      "#player-container-outer",
+      "#player-theater-container",
     ].join(",")
   );
 }
@@ -667,7 +716,7 @@ function syncScamPopupGuardFlag(rules = CURRENT_RULES) {
     return;
   }
 
-  if (rules.blockScamPopups) {
+  if (rules.blockScamPopups && !shouldUseYouTubeCompatibilityMode()) {
     root.setAttribute(SCAM_POPUP_GUARD_ATTR, "1");
   } else {
     root.removeAttribute(SCAM_POPUP_GUARD_ATTR);
@@ -879,6 +928,8 @@ async function disableScamInstallLinks() {
 }
 
 async function removeIframes() {
+  if (isEmailAppPage()) return;
+
   for (const el of document.querySelectorAll("iframe[src]")) {
     const src = el.getAttribute("src");
     if (src && isThirdParty(src)) {
@@ -900,23 +951,13 @@ async function removeIframes() {
 }
 
 function removeAds() {
-  const selectors = isYouTubePage()
-    ? YOUTUBE_AD_SELECTORS
-    : GENERIC_AD_SELECTORS;
-
+  if (isEmailAppPage()) return;
   if (isYouTubePage()) {
-    for (const button of document.querySelectorAll(YOUTUBE_SKIP_AD_SELECTORS.join(","))) {
-      if (button.disabled || button.getAttribute("aria-disabled") === "true") continue;
-      if (markProcessed(button, "skipped-youtube-ad")) continue;
-      button.click();
-      recordProtectionActivity({
-        kind: "ad-element",
-        action: "clicked",
-        label: "YouTube skip ad button",
-        rule: "removeAds",
-      });
-    }
+    removeYouTubeAds();
+    return;
   }
+
+  const selectors = GENERIC_AD_SELECTORS;
 
   removeFloatingVideoAds();
   removeStickyAdShells();
@@ -942,6 +983,40 @@ function removeAds() {
 
   removeFloatingVideoAds();
   removeStickyAdShells();
+}
+
+function removeYouTubeAds() {
+  for (const button of document.querySelectorAll(YOUTUBE_SKIP_AD_SELECTORS.join(","))) {
+    if (button.disabled || button.getAttribute("aria-disabled") === "true") continue;
+    if (markProcessed(button, "skipped-youtube-ad")) continue;
+
+    button.click();
+    recordProtectionActivity({
+      kind: "ad-element",
+      action: "clicked",
+      label: "YouTube skip ad button",
+      rule: "removeAds",
+    });
+  }
+
+  for (const selector of YOUTUBE_AD_SELECTORS) {
+    for (const el of document.querySelectorAll(selector)) {
+      if (isInsideYouTubePlayer(el)) continue;
+
+      const target = getYouTubeAdRemovalTarget(el);
+      if (!isSafeAdRemovalTarget(target)) continue;
+      if (isInsideYouTubePlayer(target)) continue;
+      if (markProcessed(target, "removed-youtube-ad")) continue;
+
+      recordProtectionActivity({
+        kind: "ad-element",
+        action: "hidden",
+        label: "YouTube page ad element",
+        rule: "removeAds",
+      });
+      target.remove();
+    }
+  }
 }
 
 function removeFloatingVideoAds() {
@@ -988,6 +1063,8 @@ async function disableTrackingLinks() {
     if (markProcessed(a, "tracking-link")) continue;
 
     const href = a.getAttribute("href") || "";
+    if (!isHttpLikeUrl(href)) continue;
+
     const cleaned = await sanitizeUrl(href);
     const absoluteHref = (() => {
       try {
@@ -1048,6 +1125,8 @@ async function disableTrackingLinks() {
 }
 
 async function removeKnownTrackers() {
+  if (isEmailAppPage()) return;
+
   const selector = [
     "script[src]",
     "iframe[src]",
@@ -1087,6 +1166,8 @@ async function removeKnownTrackers() {
 }
 
 async function removeThirdPartyScripts() {
+  if (isEmailAppPage()) return;
+
   for (const script of document.querySelectorAll("script[src]")) {
     const src = script.getAttribute("src");
     if (src && isThirdParty(src)) {
@@ -1110,6 +1191,7 @@ async function removeThirdPartyScripts() {
 // ---------- APPLY RULES ----------
 async function applyRules(rules, { force = false } = {}) {
   if (!rules) return;
+
   if (!hasActiveRules(rules)) {
     ACTIVITY_ITEMS.clear();
     reportProtectionActivity();
@@ -1125,6 +1207,13 @@ async function applyRules(rules, { force = false } = {}) {
   applyInProgress = true;
 
   try {
+    if (shouldUseYouTubeCompatibilityMode()) {
+      if (rules.removeAds) {
+        removeYouTubeAds();
+      }
+      return;
+    }
+
     if (rules.blockScamPopups) {
       await removeScamPopups();
       await disableScamInstallLinks();
@@ -1156,6 +1245,11 @@ async function applyRules(rules, { force = false } = {}) {
 }
 
 function startObserver() {
+  if (shouldUseYouTubeCompatibilityMode() && !CURRENT_RULES.removeAds) {
+    stopObserver();
+    return;
+  }
+
   if (observer) observer.disconnect();
 
   observer = new MutationObserver(() => {

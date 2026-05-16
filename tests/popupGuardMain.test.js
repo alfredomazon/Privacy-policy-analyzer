@@ -51,6 +51,7 @@ function makeElement({
 
 function runGuard({
   bodyText = "",
+  href = "https://www.google.com/search?q=how+to+make+a+taco",
   queryElements = [],
   clickTarget = null,
   nativeNotificationResult = "granted",
@@ -62,7 +63,8 @@ function runGuard({
 
   const window = {
     location: {
-      href: "https://www.google.com/search?q=how+to+make+a+taco",
+      href,
+      hostname: new URL(href).hostname,
     },
     addEventListener(type, handler) {
       const current = listeners.get(type) || [];
@@ -209,6 +211,19 @@ test("safety guard allows normal user-initiated notification opt-ins", async () 
   });
 
   guard.fire("pointerdown", { isTrusted: true });
+  const result = await guard.window.Notification.requestPermission();
+
+  assert.equal(result, "granted");
+  assert.equal(guard.nativePermissionCalls.length, 1);
+  assert.equal(guard.reports.length, 0);
+});
+
+test("safety guard allows trusted email-app notification prompts", async () => {
+  const guard = runGuard({
+    href: "https://mail.google.com/mail/u/0/#inbox",
+    bodyText: "Enable desktop notifications for new mail and new messages.",
+  });
+
   const result = await guard.window.Notification.requestPermission();
 
   assert.equal(result, "granted");
