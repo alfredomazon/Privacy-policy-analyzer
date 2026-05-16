@@ -57,6 +57,13 @@
     "order updates",
     "shipping updates",
     "breaking news alerts",
+    "desktop notifications",
+    "email notifications",
+    "mail notifications",
+    "new mail",
+    "new email",
+    "new messages",
+    "incoming mail",
   ];
   const unwantedInstallTerms = [
     "wave browser",
@@ -115,6 +122,35 @@
 
   function normalizeText(value = "") {
     return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function getHostname() {
+    try {
+      return window.location.hostname.replace(/^www\./, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
+  function isTrustedCommunicationApp() {
+    const host = getHostname();
+    return (
+      host === "mail.google.com" ||
+      host === "gmail.com" ||
+      host.endsWith(".gmail.com") ||
+      host === "outlook.live.com" ||
+      host === "outlook.office.com" ||
+      host === "outlook.office365.com" ||
+      host === "mail.live.com" ||
+      host === "mail.yahoo.com" ||
+      host === "mail.proton.me" ||
+      host === "proton.me" ||
+      host.endsWith(".proton.me") ||
+      host === "protonmail.com" ||
+      host.endsWith(".protonmail.com") ||
+      host === "icloud.com" ||
+      host.endsWith(".icloud.com")
+    );
   }
 
   function report(detail = {}) {
@@ -308,6 +344,18 @@
         level: "likely",
         label: "Likely scam",
         reason: "repeated notification prompt",
+      };
+    }
+
+    if (
+      notificationRequest &&
+      trustedNotification &&
+      isTrustedCommunicationApp()
+    ) {
+      return {
+        level: "normal",
+        label: "Normal popup",
+        reason: "",
       };
     }
 

@@ -185,6 +185,27 @@ function isYouTubePage() {
   return host === "youtube.com" || host.endsWith(".youtube.com");
 }
 
+function isEmailAppPage() {
+  const host = getHostname();
+  return (
+    host === "mail.google.com" ||
+    host === "gmail.com" ||
+    host.endsWith(".gmail.com") ||
+    host === "outlook.live.com" ||
+    host === "outlook.office.com" ||
+    host === "outlook.office365.com" ||
+    host === "mail.live.com" ||
+    host === "mail.yahoo.com" ||
+    host === "mail.proton.me" ||
+    host === "proton.me" ||
+    host.endsWith(".proton.me") ||
+    host === "protonmail.com" ||
+    host.endsWith(".protonmail.com") ||
+    host === "icloud.com" ||
+    host.endsWith(".icloud.com")
+  );
+}
+
 function isYouTubeCoreResource(url) {
   if (!isYouTubePage()) return false;
 
@@ -203,6 +224,23 @@ function isYouTubeCoreResource(url) {
     host === "ggpht.com" ||
     host.endsWith(".ggpht.com")
   );
+}
+
+function isUserActionProtocolUrl(rawUrl = "") {
+  return /^(mailto|tel|sms|facetime|imessage|webcal):/i.test(
+    String(rawUrl || "").trim()
+  );
+}
+
+function isHttpLikeUrl(rawUrl = "") {
+  if (isUserActionProtocolUrl(rawUrl)) return false;
+
+  try {
+    const parsed = new URL(rawUrl, location.href);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function isCriticalYouTubeElement(el) {
@@ -879,6 +917,8 @@ async function disableScamInstallLinks() {
 }
 
 async function removeIframes() {
+  if (isEmailAppPage()) return;
+
   for (const el of document.querySelectorAll("iframe[src]")) {
     const src = el.getAttribute("src");
     if (src && isThirdParty(src)) {
@@ -900,6 +940,8 @@ async function removeIframes() {
 }
 
 function removeAds() {
+  if (isEmailAppPage()) return;
+
   const selectors = isYouTubePage()
     ? YOUTUBE_AD_SELECTORS
     : GENERIC_AD_SELECTORS;
@@ -988,6 +1030,8 @@ async function disableTrackingLinks() {
     if (markProcessed(a, "tracking-link")) continue;
 
     const href = a.getAttribute("href") || "";
+    if (!isHttpLikeUrl(href)) continue;
+
     const cleaned = await sanitizeUrl(href);
     const absoluteHref = (() => {
       try {
@@ -1048,6 +1092,8 @@ async function disableTrackingLinks() {
 }
 
 async function removeKnownTrackers() {
+  if (isEmailAppPage()) return;
+
   const selector = [
     "script[src]",
     "iframe[src]",
@@ -1087,6 +1133,8 @@ async function removeKnownTrackers() {
 }
 
 async function removeThirdPartyScripts() {
+  if (isEmailAppPage()) return;
+
   for (const script of document.querySelectorAll("script[src]")) {
     const src = script.getAttribute("src");
     if (src && isThirdParty(src)) {
