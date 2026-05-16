@@ -940,25 +940,9 @@ async function removeIframes() {
 }
 
 function removeAds() {
-  if (isEmailAppPage()) return;
+  if (isEmailAppPage() || isYouTubePage()) return;
 
-  const selectors = isYouTubePage()
-    ? YOUTUBE_AD_SELECTORS
-    : GENERIC_AD_SELECTORS;
-
-  if (isYouTubePage()) {
-    for (const button of document.querySelectorAll(YOUTUBE_SKIP_AD_SELECTORS.join(","))) {
-      if (button.disabled || button.getAttribute("aria-disabled") === "true") continue;
-      if (markProcessed(button, "skipped-youtube-ad")) continue;
-      button.click();
-      recordProtectionActivity({
-        kind: "ad-element",
-        action: "clicked",
-        label: "YouTube skip ad button",
-        rule: "removeAds",
-      });
-    }
-  }
+  const selectors = GENERIC_AD_SELECTORS;
 
   removeFloatingVideoAds();
   removeStickyAdShells();

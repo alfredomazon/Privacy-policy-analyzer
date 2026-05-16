@@ -470,6 +470,41 @@ function nextDnrRuleStart(existingMap = {}) {
   return Math.max(...used) + 1;
 }
 
+function isOwnedDnrRuleId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id >= DNR_RULE_ID_START;
+}
+
+function uniqueDnrRuleIds(values = []) {
+  return [...new Set(values.map(Number).filter(isOwnedDnrRuleId))];
+}
+
+async function getOwnedDynamicRules() {
+  if (!chrome.declarativeNetRequest?.getDynamicRules) return [];
+
+  try {
+    const rules = await chrome.declarativeNetRequest.getDynamicRules();
+    return Array.isArray(rules)
+      ? rules.filter((rule) => isOwnedDnrRuleId(rule?.id))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function getOwnedDynamicRuleIdsForHost(hostname) {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!host) return [];
+
+  const rules = await getOwnedDynamicRules();
+  return rules
+    .filter((rule) => {
+      const initiators = rule?.condition?.initiatorDomains || [];
+      return initiators.includes(host);
+    })
+    .map((rule) => rule.id);
+}
+
 async function syncManualProtectionRules(hostname, rules) {
   if (!chrome.declarativeNetRequest?.updateDynamicRules) return;
 
@@ -477,9 +512,11 @@ async function syncManualProtectionRules(hostname, rules) {
   if (!host) return;
 
   const existingMap = await getStoredDnrRuleIds();
-  const removeRuleIds = Array.isArray(existingMap[host])
-    ? existingMap[host]
-    : [];
+  const orphanRuleIds = await getOwnedDynamicRuleIdsForHost(host);
+  const removeRuleIds = uniqueDnrRuleIds([
+    ...(Array.isArray(existingMap[host]) ? existingMap[host] : []),
+    ...orphanRuleIds,
+  ]);
   const startId = nextDnrRuleStart(existingMap);
   const addRules = buildDynamicProtectionRulesForHost({
     hostname: host,
@@ -507,7 +544,11 @@ async function syncAllManualProtectionRules() {
 
   const allRules = await getAllManualSiteRules();
   const existingMap = await getStoredDnrRuleIds();
-  const removeRuleIds = Object.values(existingMap).flat();
+  const ownedRuleIds = (await getOwnedDynamicRules()).map((rule) => rule.id);
+  const removeRuleIds = uniqueDnrRuleIds([
+    ...Object.values(existingMap).flat(),
+    ...ownedRuleIds,
+  ]);
   const nextMap = {};
   const addRules = [];
   let nextId = DNR_RULE_ID_START;
