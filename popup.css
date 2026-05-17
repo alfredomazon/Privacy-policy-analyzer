@@ -57,7 +57,7 @@ body[data-risk-theme="yellow"] {
 
 html {
   margin: 0;
-  background: transparent;
+  background: var(--bg);
 }
 
 [hidden] {
@@ -70,7 +70,7 @@ body {
   min-height: 620px;
   padding: 4px;
   font-family: Arial, Helvetica, sans-serif;
-  background: transparent;
+  background: var(--bg);
   color: var(--text);
   overflow-x: hidden;
 }
