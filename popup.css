@@ -27,6 +27,8 @@
   --info: var(--theme-accent);
   --chip: #222a39;
   --shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  --popup-radius: 18px;
+  --popup-edge: rgba(var(--theme-rgb), 0.18);
 }
 
 body[data-risk-theme="red"] {
@@ -53,6 +55,11 @@ body[data-risk-theme="yellow"] {
   box-sizing: border-box;
 }
 
+html {
+  margin: 0;
+  background: transparent;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -61,16 +68,28 @@ body {
   margin: 0;
   width: 420px;
   min-height: 620px;
+  padding: 4px;
   font-family: Arial, Helvetica, sans-serif;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
+  overflow-x: hidden;
 }
 
 .wrap {
+  min-height: calc(620px - 8px);
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(255, 255, 255, 0)),
+    var(--bg);
+  border: 1px solid var(--popup-edge);
+  border-radius: var(--popup-radius);
+  box-shadow:
+    0 18px 36px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.025) inset;
+  overflow: hidden;
 }
 
 .topbar {
