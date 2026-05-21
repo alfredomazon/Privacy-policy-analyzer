@@ -28,6 +28,7 @@ const SCANNING_TABS = new Set();
 const NETWORK_TRACKER_SIGNALS_BY_TAB = new Map();
 const PROTECTION_ACTIVITY_BY_TAB = new Map();
 const LAST_PROTECTION_ACTIVITY_BY_TAB = new Map();
+const PROTECTION_MUTATED_TABS = new Set();
 const MAX_NETWORK_TRACKER_SIGNALS = 80;
 const PENDING_POLICY_EVIDENCE_BY_TAB = new Map();
 const POLICY_EVIDENCE_RETRY_DELAYS = [250, 700, 1400, 2600, 4200];
@@ -173,6 +174,7 @@ function resetTabState(tabId) {
   SCANNING_TABS.delete(tabId);
   clearNetworkTrackerSignals(tabId);
   clearProtectionActivity(tabId);
+  PROTECTION_MUTATED_TABS.delete(tabId);
   clearPendingPolicyEvidence(tabId);
 }
 
@@ -227,20 +229,28 @@ function hasActiveManualRules(rules = {}) {
   return Object.values({ ...DEFAULT_MANUAL_RULES, ...(rules || {}) }).some(Boolean);
 }
 
-function filterProtectionItemsForRules(items = [], rules = {}) {
+function getActiveProtectionRuleSet(rules = {}) {
   const merged = { ...DEFAULT_MANUAL_RULES, ...(rules || {}) };
-  const activeRules = new Set(
+  return new Set(
     Object.entries(merged)
       .filter(([, enabled]) => !!enabled)
       .map(([key]) => key)
   );
+}
 
+function filterProtectionItemsForRules(items = [], rules = {}) {
+  const activeRules = getActiveProtectionRuleSet(rules);
   if (!activeRules.size) return [];
 
   return items.filter((item) => {
     const rule = String(item?.rule || "");
     return !rule || activeRules.has(rule);
   });
+}
+
+function protectionItemMatchesActiveRule(item = {}, activeRules = new Set()) {
+  const rule = String(item?.rule || "");
+  return activeRules.size > 0 && (!rule || activeRules.has(rule));
 }
 
 function countProtectionItems(items = []) {
@@ -283,9 +293,11 @@ function rememberProtectionActivity(tabId, tabUrl, activity = {}) {
   const pageHostname = getHostnameFromUrl(tabUrl || LAST_URL_BY_TAB.get(tabId) || "");
   const rules = { ...DEFAULT_MANUAL_RULES, ...(activity.rules || {}) };
   const active = !!activity.active && hasActiveManualRules(rules);
+  const activeRules = getActiveProtectionRuleSet(rules);
   let items = Array.isArray(activity.items)
     ? activity.items
         .map((item) => enrichProtectionActivityItem(item, pageHostname))
+        .filter((item) => protectionItemMatchesActiveRule(item, activeRules))
         .slice(0, 80)
     : [];
 
@@ -311,6 +323,7 @@ function rememberProtectionActivity(tabId, tabUrl, activity = {}) {
   }
 
   if (active && items.length) {
+    PROTECTION_MUTATED_TABS.add(tabId);
     LAST_PROTECTION_ACTIVITY_BY_TAB.set(tabId, snapshot);
   }
 }
@@ -657,6 +670,7 @@ function handleTabLoading(tabId, info) {
     TOOLBAR_STATE_BY_TAB.delete(tabId);
     clearNetworkTrackerSignals(tabId);
     clearProtectionActivity(tabId);
+    PROTECTION_MUTATED_TABS.delete(tabId);
   }
 }
 
@@ -769,8 +783,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const protectionActivity = getProtectionActivity(tabId);
         const protectionHasActed =
           Number(protectionActivity?.counts?.total || 0) > 0;
+        const pageWasMutatedByProtection = PROTECTION_MUTATED_TABS.has(tabId);
 
-        if (cached && (!msg.force || protectionHasActed)) {
+        if (
+          cached &&
+          (!msg.force || protectionHasActed || pageWasMutatedByProtection)
+        ) {
           const { normalized, computed } = safeComputeToolbarState(cached, {
             protectionActivity,
           });
@@ -959,16 +977,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             rules: mergedRules,
           });
 
-          if (!hasActiveManualRules(mergedRules)) {
-            rememberProtectionActivity(tab.id, tab.url || "", {
-              active: false,
-              scanCompleted: true,
-              rules: mergedRules,
-              items: [],
-              updatedAt: Date.now(),
-            });
-            refreshToolbarFromCachedResult(tab.id, tab.url || "", { force: true });
-          }
+          const existingActivity = getProtectionActivity(tab.id);
+          rememberProtectionActivity(tab.id, tab.url || "", {
+            active: hasActiveManualRules(mergedRules),
+            scanCompleted: existingActivity?.scanCompleted === true,
+            rules: mergedRules,
+            items: existingActivity?.items || [],
+            updatedAt: Date.now(),
+          });
+          refreshToolbarFromCachedResult(tab.id, tab.url || "", { force: true });
         }
 
         sendResponse({ ok: true });

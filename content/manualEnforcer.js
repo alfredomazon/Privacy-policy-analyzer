@@ -589,10 +589,23 @@ function scheduleActivityReport() {
   reportTimer = setTimeout(reportProtectionActivity, 120);
 }
 
+function activityItemMatchesRules(item = {}, rules = CURRENT_RULES) {
+  const rule = String(item?.rule || "");
+  return !rule || !!rules?.[rule];
+}
+
+function pruneActivityItemsForRules(rules = CURRENT_RULES) {
+  for (const [key, item] of ACTIVITY_ITEMS.entries()) {
+    if (!activityItemMatchesRules(item, rules)) {
+      ACTIVITY_ITEMS.delete(key);
+    }
+  }
+}
+
 function buildActivitySnapshot() {
   const items = Array.from(ACTIVITY_ITEMS.values()).sort(
     (a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0)
-  );
+  ).filter((item) => activityItemMatchesRules(item));
 
   const counts = items.reduce((acc, item) => {
     const count = Number(item.count || 1);
@@ -1191,6 +1204,8 @@ async function removeThirdPartyScripts() {
 // ---------- APPLY RULES ----------
 async function applyRules(rules, { force = false } = {}) {
   if (!rules) return;
+
+  pruneActivityItemsForRules(rules);
 
   if (!hasActiveRules(rules)) {
     ACTIVITY_ITEMS.clear();

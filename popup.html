@@ -13,9 +13,14 @@
         <img id="brand-eye" src="icons/EvilEye48.png" alt="Evil Eye logo" />
         <div class="brand-text">
           <div class="brand-title">Evil Eye</div>
-          <div class="brand-subtitle">Data Snitch</div>
+          <div class="brand-subtitle">Privacy Watchdog</div>
         </div>
       </div>
+    </div>
+
+    <div id="first-run-explanation" class="first-run-explanation" hidden>
+      <span>Blue means no major issue. Yellow means review activity or policy. Red means stronger concern.</span>
+      <button id="first-run-dismiss" type="button" aria-label="Dismiss explanation">Dismiss</button>
     </div>
 
     <!-- View switch -->
@@ -32,7 +37,9 @@
       <div id="policy-result-card" class="card">
         <div class="row-between">
           <div class="section-title flush">Privacy Summary</div>
-          <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
+          <div class="page-header-actions">
+            <button id="heuristic-refresh" class="primary" type="button">Refresh</button>
+          </div>
         </div>
 
         <div id="policy-summary-card" class="section-block">
@@ -104,7 +111,9 @@
       <div id="tracker-details" class="card tracker-page-card">
         <div class="row-between">
           <div class="section-title flush">Page Activity</div>
-          <button id="tracker-refresh" class="primary" type="button">Refresh</button>
+          <div class="page-header-actions">
+            <button id="tracker-refresh" class="primary" type="button">Refresh</button>
+          </div>
         </div>
 
         <div class="section-block">
@@ -133,7 +142,13 @@
     ========================== -->
     <div id="view-protect" class="popup-view">
       <div class="card">
-        <div class="section-title">Protection</div>
+        <div class="row-between">
+          <div class="section-title flush">Protection</div>
+          <div class="page-header-actions">
+            <button id="protect-refresh" class="primary" type="button">Refresh status</button>
+            <button id="protect-page-reload" type="button">Reload page</button>
+          </div>
+        </div>
         <div class="summary-box protect-intro">
           Ad cleanup and notification-trap blocking start on for safety. Stronger site controls stay manual.
         </div>
@@ -143,6 +158,13 @@
           <div id="protect-site-label" class="link-box">Loading current site…</div>
           <div id="protect-network-chip" class="protect-network-chip" hidden>
             Safety defaults active
+          </div>
+          <div id="protect-activity-shortcut" class="protect-activity-shortcut" hidden>
+            <span id="protect-activity-summary">Protection blocked activity on this page.</span>
+            <button id="protect-view-activity" type="button">View activity</button>
+          </div>
+          <div id="protect-reload-hint" class="protect-reload-hint" hidden>
+            Reload page to apply network blocking fully.
           </div>
         </div>
 

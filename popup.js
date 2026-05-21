@@ -16,6 +16,37 @@ function showToast(toastContainer, message, type = "info") {
 
 // ---------- Shared helpers ----------
 let popupUserSelectedView = false;
+const FIRST_RUN_EXPLANATION_DISMISSED_KEY = "firstRunExplanationDismissed";
+
+function getLocalStorageValue(key) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([key], (res) => {
+      resolve(res?.[key]);
+    });
+  });
+}
+
+function setLocalStorageValues(values) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(values, () => resolve());
+  });
+}
+
+async function initFirstRunExplanation() {
+  const panel = document.getElementById("first-run-explanation");
+  const dismiss = document.getElementById("first-run-dismiss");
+  if (!panel || !dismiss) return;
+
+  const dismissed = await getLocalStorageValue(FIRST_RUN_EXPLANATION_DISMISSED_KEY);
+  panel.hidden = dismissed === true;
+
+  dismiss.addEventListener("click", async () => {
+    panel.hidden = true;
+    await setLocalStorageValues({
+      [FIRST_RUN_EXPLANATION_DISMISSED_KEY]: true,
+    });
+  });
+}
 
 async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1941,6 +1972,10 @@ function getProtectionEls() {
   return {
     siteLabel: document.getElementById("protect-site-label"),
     networkChip: document.getElementById("protect-network-chip"),
+    activityShortcut: document.getElementById("protect-activity-shortcut"),
+    activitySummary: document.getElementById("protect-activity-summary"),
+    viewActivityBtn: document.getElementById("protect-view-activity"),
+    reloadHint: document.getElementById("protect-reload-hint"),
     enableAll: document.getElementById("protect-enable-all"),
     blockTrackers: document.getElementById("protect-block-trackers"),
     blockThirdPartyScripts: document.getElementById("protect-block-third-party-scripts"),
@@ -1948,6 +1983,8 @@ function getProtectionEls() {
     removeAds: document.getElementById("protect-remove-ads"),
     disableTrackingLinks: document.getElementById("protect-disable-tracking-links"),
     blockScamPopups: document.getElementById("protect-block-scam-popups"),
+    refreshBtn: document.getElementById("protect-refresh"),
+    pageReloadBtn: document.getElementById("protect-page-reload"),
     saveBtn: document.getElementById("protect-save"),
     resetBtn: document.getElementById("protect-reset"),
     status: document.getElementById("protect-status"),
@@ -1957,6 +1994,31 @@ function getProtectionEls() {
 function protectionUsesVisibleProtection(rules = {}) {
   const merged = { ...DEFAULT_PROTECTION_RULES, ...(rules || {}) };
   return Object.values(merged).some(Boolean);
+}
+
+function usesReloadSensitiveProtection(rules = {}) {
+  const merged = { ...DEFAULT_PROTECTION_RULES, ...(rules || {}) };
+  return !!(
+    merged.blockTrackers ||
+    merged.blockThirdPartyScripts ||
+    merged.blockIframes
+  );
+}
+
+function enabledReloadSensitiveProtection(previousRules = {}, nextRules = {}) {
+  const previous = { ...DEFAULT_PROTECTION_RULES, ...(previousRules || {}) };
+  const next = { ...DEFAULT_PROTECTION_RULES, ...(nextRules || {}) };
+
+  return (
+    (!previous.blockTrackers && next.blockTrackers) ||
+    (!previous.blockThirdPartyScripts && next.blockThirdPartyScripts) ||
+    (!previous.blockIframes && next.blockIframes)
+  );
+}
+
+function setProtectionReloadHint(els, visible) {
+  if (!els.reloadHint) return;
+  els.reloadHint.hidden = !visible;
 }
 
 function updateProtectionNetworkChip(els, savedRules = {}) {
@@ -1980,6 +2042,22 @@ function updateProtectionNetworkChip(els, savedRules = {}) {
     advancedActive
       ? "One or more stronger per-site protection controls are enabled."
       : "Obvious ad cleanup and scam-notification protection are on by default.";
+}
+
+function renderProtectionActivityShortcut(els, activity = null) {
+  if (!els.activityShortcut || !els.activitySummary) return;
+
+  const count = getProtectionBlockedCount(
+    getProtectionActivityItems(activity)
+  );
+
+  if (count <= 0) {
+    els.activityShortcut.hidden = true;
+    return;
+  }
+
+  els.activityShortcut.hidden = false;
+  els.activitySummary.textContent = `${count} blocked on this page.`;
 }
 
 function getProtectionInputs(els) {
@@ -2016,6 +2094,7 @@ function setProtectionActionsDisabled(els, disabled) {
 function markProtectionChoicesChanged(els, message) {
   els.status.className = "status-text status-blue";
   els.status.textContent = message;
+  setProtectionReloadHint(els, false);
 }
 
 function setProtectionUi(els, rules = {}) {
@@ -2050,6 +2129,7 @@ async function loadProtectionRulesIntoPopup(els, tab) {
     setProtectionActionsDisabled(els, true);
     setProtectionUi(els, DEFAULT_PROTECTION_RULES);
     updateProtectionNetworkChip(els, DEFAULT_PROTECTION_RULES);
+    setProtectionReloadHint(els, false);
     return { hostname: "", rules: { ...DEFAULT_PROTECTION_RULES } };
   }
 
@@ -2067,6 +2147,7 @@ async function loadProtectionRulesIntoPopup(els, tab) {
   updateProtectionNetworkChip(els, rules);
   els.status.textContent =
     "Safety defaults are active. Save only if you change this site's settings.";
+  setProtectionReloadHint(els, false);
   setProtectionActionsDisabled(els, false);
 
   return { hostname, rules };
@@ -2125,11 +2206,14 @@ async function init() {
   const protectionEls = getProtectionEls();
   const activeTab = await getActiveTab();
 
+  initFirstRunExplanation();
+
   let latestHeuristic = await loadHeuristicIntoPopup(heuristicEls);
   let protectionState = await loadProtectionRulesIntoPopup(protectionEls, activeTab);
   const initialProtectionActivity = activeTab?.id
     ? await loadProtectionActivityForTab(activeTab.id)
     : null;
+  renderProtectionActivityShortcut(protectionEls, initialProtectionActivity);
   syncTrackerShortcutAndAutoView(
     latestHeuristic,
     initialProtectionActivity
@@ -2155,6 +2239,42 @@ async function init() {
 
   if (trackerDriverOpen) {
     trackerDriverOpen.addEventListener("click", () => {
+      activateView("trackers", { user: true });
+    });
+  }
+
+  if (protectionEls.refreshBtn) {
+    protectionEls.refreshBtn.addEventListener("click", async () => {
+      const tab = await getActiveTab();
+      protectionState = await loadProtectionRulesIntoPopup(protectionEls, tab);
+      latestHeuristic = await loadHeuristicIntoPopup(heuristicEls, {
+        force: true,
+      });
+      const protectionActivity = tab?.id
+        ? await loadProtectionActivityForTab(tab.id)
+        : null;
+      renderProtectionActivityShortcut(protectionEls, protectionActivity);
+      showToast(toastContainer, "Protection refreshed", "info");
+    });
+  }
+
+  if (protectionEls.pageReloadBtn) {
+    protectionEls.pageReloadBtn.addEventListener("click", async () => {
+      const tab = await getActiveTab();
+
+      if (!tab?.id) {
+        showToast(toastContainer, "No active page to reload", "error");
+        return;
+      }
+
+      chrome.tabs.reload(tab.id);
+      setProtectionReloadHint(protectionEls, false);
+      showToast(toastContainer, "Page reload requested", "info");
+    });
+  }
+
+  if (protectionEls.viewActivityBtn) {
+    protectionEls.viewActivityBtn.addEventListener("click", () => {
       activateView("trackers", { user: true });
     });
   }
@@ -2200,6 +2320,9 @@ async function init() {
   if (protectionEls.saveBtn) {
     protectionEls.saveBtn.addEventListener("click", async () => {
       const rules = readProtectionUi(protectionEls);
+      const shouldShowReloadHint =
+        enabledReloadSensitiveProtection(protectionState.rules, rules) &&
+        usesReloadSensitiveProtection(rules);
 
       const res = await chrome.runtime.sendMessage({
         type: "SET_RULES_FOR_HOST",
@@ -2214,11 +2337,19 @@ async function init() {
         };
         protectionEls.status.className = "status-text status-green";
         protectionEls.status.textContent =
-          "Protection saved. If it blocks tracker behavior, the eye may update.";
+          shouldShowReloadHint
+            ? "Protection saved. Reload this page to apply stronger blocking fully."
+            : "Protection saved. If it blocks tracker behavior, the eye may update.";
         updateProtectionNetworkChip(protectionEls, rules);
+        setProtectionReloadHint(protectionEls, shouldShowReloadHint);
         showToast(toastContainer, "Protection saved", "success");
-        setTimeout(() => {
-          refreshTrackerProtectionView(latestHeuristic);
+        setTimeout(async () => {
+          await refreshTrackerProtectionView(latestHeuristic);
+          const tab = await getActiveTab();
+          const protectionActivity = tab?.id
+            ? await loadProtectionActivityForTab(tab.id)
+            : null;
+          renderProtectionActivityShortcut(protectionEls, protectionActivity);
         }, 300);
       } else {
         protectionEls.status.className = "status-text status-red";
@@ -2248,9 +2379,15 @@ async function init() {
         protectionEls.status.textContent =
           "Safety defaults restored for this site.";
         updateProtectionNetworkChip(protectionEls, DEFAULT_PROTECTION_RULES);
+        setProtectionReloadHint(protectionEls, false);
         showToast(toastContainer, "Safety defaults restored", "info");
-        setTimeout(() => {
-          refreshTrackerProtectionView(latestHeuristic);
+        setTimeout(async () => {
+          await refreshTrackerProtectionView(latestHeuristic);
+          const tab = await getActiveTab();
+          const protectionActivity = tab?.id
+            ? await loadProtectionActivityForTab(tab.id)
+            : null;
+          renderProtectionActivityShortcut(protectionEls, protectionActivity);
         }, 300);
       } else {
         protectionEls.status.className = "status-text status-red";

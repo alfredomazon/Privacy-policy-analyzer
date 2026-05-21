@@ -35,6 +35,12 @@ Run the test suite:
 npm test
 ```
 
+Before packaging or publishing, run through the manual regression checklist:
+
+```text
+docs/REGRESSION_CHECKLIST.md
+```
+
 Build a clean Chrome Web Store ZIP:
 
 ```bash
